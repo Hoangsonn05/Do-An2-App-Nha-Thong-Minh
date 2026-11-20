@@ -1,0 +1,643 @@
+﻿====================================================================
+SmartHomeAI P1.1-B1 — RTDB Security Rules & Emulator Verification Report
+Timestamp (Local): 2026-11-20 23:35:46 +07:00
+Emulator Project: demo-smarthomeai (local only; zero production contact)
+Node.js: v20.20.2
+firebase-tools: 13.35.1
+Java (JBR21):
+java.exe : openjdk version "21.0.4" 2024-07-16
+At line:7 char:13
++ $javaVer = (& "D:\Program Files\Android Studio\jbr\bin\java.exe" -ver ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (openjdk version "21.0.4" 2024-07-16:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+OpenJDK Runtime Environment (build 21.0.4+-12508038-b607.1)
+OpenJDK 64-Bit Server VM (build 21.0.4+-12508038-b607.1, mixed mode)
+====================================================================
+
+--- [1] build-rules.mjs & build-rules.test.mjs ---
+
+> smarthomeai-cloud-rules@1.0.0 build:rules
+> node build-rules.mjs
+
+Built database.rules.json (23511 bytes) from database.rules.src.json.
+
+
+> smarthomeai-cloud-rules@1.0.0 test:build
+> node --test test/build-rules.test.mjs
+
+TAP version 13
+# Subtest: expandExpression expands composite tokens before base tokens and preserves $ variables
+ok 1 - expandExpression expands composite tokens before base tokens and preserves $ variables
+  ---
+  duration_ms: 1.6337
+  ...
+# Subtest: buildRulesJson rejects JSONC comments
+ok 2 - buildRulesJson rejects JSONC comments
+  ---
+  duration_ms: 0.4523
+  ...
+# Subtest: buildRulesJson rejects unknown @TOKEN
+ok 3 - buildRulesJson rejects unknown @TOKEN
+  ---
+  duration_ms: 0.2772
+  ...
+# Subtest: database.rules.src.json parses as pure JSON and builds valid database.rules.json with zero unexpanded tokens
+ok 4 - database.rules.src.json parses as pure JSON and builds valid database.rules.json with zero unexpanded tokens
+  ---
+  duration_ms: 2.5751
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 95.7942
+
+--- [2] RTDB Emulator Rules Test Suite (test/rules.test.mjs) ---
+
+> smarthomeai-cloud-rules@1.0.0 test:rules
+> node build-rules.mjs && node scripts/run-emulator.mjs
+
+Built database.rules.json (23511 bytes) from database.rules.src.json.
+[run-emulator] JAVA_HOME=D:\Program Files\Android Studio\jbr
+[run-emulator] Project=demo-smarthomeai (local emulator only)
+[run-emulator] Command=node --test test/rules.test.mjs
+[33m[1m!  emulators:[22m[39m You are not currently authenticated so some features may not work correctly. Please run [1mfirebase login[22m to authenticate the CLI.
+[36m[1mi  emulators:[22m[39m Starting emulators: database
+[36m[1mi  emulators:[22m[39m Detected demo project ID "demo-smarthomeai", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+[36m[1mi  database:[22m[39m Database Emulator logging to [1mdatabase-debug.log[22m
+[36m[1mi [22m[39m Running script: [1mnode --test test/rules.test.mjs[22m
+TAP version 13
+# [2026-11-20T16:35:54.676Z]  @firebase/database: FIREBASE WARNING: set at /users/anon1 failed: permission_denied 
+# Subtest: Group 1: Isolation & Positive Reads (\#1-\#6, F5)
+    # Subtest: \#1 unauth cannot read or write any node (@AUTH)
+    ok 1 - \#1 unauth cannot read or write any node (@AUTH)
+      ---
+      duration_ms: 478.1064
+      ...
+    # Subtest: \#2 uA cannot read cross-home home_C001 nodes (@MEMBER)
+    ok 2 - \#2 uA cannot read cross-home home_C001 nodes (@MEMBER)
+      ---
+      duration_ms: 221.6904
+      ...
+    # Subtest: \#3 stranger uD cannot read any home_A001 node (@MEMBER)
+    ok 3 - \#3 stranger uD cannot read any home_A001 node (@MEMBER)
+      ---
+      duration_ms: 160.8757
+      ...
+# [2026-11-20T16:35:55.190Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uD failed: permission_denied 
+# [2026-11-20T16:35:55.195Z]  @firebase/database: FIREBASE WARNING: set at /userHomes/uD/home_A001 failed: permission_denied 
+# [2026-11-20T16:35:55.199Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+    # Subtest: \#4 stranger uD cannot write members/userHomes/state under home_A001
+    ok 4 - \#4 stranger uD cannot write members/userHomes/state under home_A001
+      ---
+      duration_ms: 138.4459
+      ...
+# [2026-11-20T16:35:55.308Z]  @firebase/database: FIREBASE WARNING: set at /userHomes/uB/home_C001 failed: permission_denied 
+# [2026-11-20T16:35:55.312Z]  @firebase/database: FIREBASE WARNING: set at /userHomes/uD/home_A001 failed: permission_denied 
+    # Subtest: \#5 uB cannot read userHomes/uA or forge userHomes entries
+    ok 5 - \#5 uB cannot read userHomes/uA or forge userHomes entries
+      ---
+      duration_ms: 112.8694
+      ...
+    # Subtest: \#6a [F5] Owner uA can read meta, members, devices, state, config, telemetry, commands, acks, events
+    ok 6 - \#6a [F5] Owner uA can read meta, members, devices, state, config, telemetry, commands, acks, events
+      ---
+      duration_ms: 267.8616
+      ...
+    # Subtest: \#6b [F5] Member uB can read meta, members, devices, state, config, telemetry, commands, acks, events
+    ok 7 - \#6b [F5] Member uB can read meta, members, devices, state, config, telemetry, commands, acks, events
+      ---
+      duration_ms: 168.9867
+      ...
+    1..7
+ok 1 - Group 1: Isolation & Positive Reads (\#1-\#6, F5)
+  ---
+  duration_ms: 1634.8376
+  type: 'suite'
+  ...
+# Subtest: Group 2: users/{uid} & optional updatedAt (\#7-\#10, F3, ROW-12)
+    # Subtest: \#7 uB creates own users/uB with displayName + createdAt: TIMESTAMP and reads it
+    ok 1 - \#7 uB creates own users/uB with displayName + createdAt: TIMESTAMP and reads it
+      ---
+      duration_ms: 132.3233
+      ...
+    # Subtest: \#8a uA updates users/uA keeping createdAt and refreshing updatedAt: TIMESTAMP
+    ok 2 - \#8a uA updates users/uA keeping createdAt and refreshing updatedAt: TIMESTAMP
+      ---
+      duration_ms: 109.6007
+      ...
+    # Subtest: \#8b [ROW-12][F3] users/uA partial update displayName without updating updatedAt and deleting optional updatedAt matches optional contract
+    ok 3 - \#8b [ROW-12][F3] users/uA partial update displayName without updating updatedAt and deleting optional updatedAt matches optional contract
+      ---
+      duration_ms: 147.3591
+      ...
+# [2026-11-20T16:35:56.225Z]  @firebase/database: FIREBASE WARNING: set at /users/uA failed: permission_denied 
+    # Subtest: \#9a uA cannot delete users/uA (blocked by newData.exists())
+    ok 4 - \#9a uA cannot delete users/uA (blocked by newData.exists())
+      ---
+      duration_ms: 84.7166
+      ...
+# [2026-11-20T16:35:56.332Z]  @firebase/database: FIREBASE WARNING: set at /users/uA/createdAt failed: permission_denied 
+    # Subtest: \#9b uA cannot overwrite users/uA/createdAt to a different value
+    ok 5 - \#9b uA cannot overwrite users/uA/createdAt to a different value
+      ---
+      duration_ms: 106.7527
+      ...
+# [2026-11-20T16:35:56.566Z]  @firebase/database: FIREBASE WARNING: set at /users/uA/displayName failed: permission_denied 
+# [2026-11-20T16:35:56.614Z]  @firebase/database: FIREBASE WARNING: set at /users/uA/displayName failed: permission_denied 
+    # Subtest: \#10 uB and uD cannot read or write users/uA
+    ok 6 - \#10 uB and uD cannot read or write users/uA
+      ---
+      duration_ms: 282.4868
+      ...
+    1..6
+ok 2 - Group 2: users/{uid} & optional updatedAt (\#7-\#10, F3, ROW-12)
+  ---
+  duration_ms: 863.9747
+  type: 'suite'
+  ...
+# Subtest: Group 3: Homes, Members & Live Listener Revocation (\#11-\#22)
+    # Subtest: \#11 uA creates new home home_N001 sequentially: meta -> members/uA -> userHomes/uA/home_N001
+    ok 1 - \#11 uA creates new home home_N001 sequentially: meta -> members/uA -> userHomes/uA/home_N001
+      ---
+      duration_ms: 139.7746
+      ...
+# [2026-11-20T16:35:56.850Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_N002/meta failed: permission_denied 
+# [2026-11-20T16:35:56.854Z]  @firebase/database: FIREBASE WARNING: set at /homes/1/meta failed: permission_denied 
+# [2026-11-20T16:35:56.860Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_N003/meta failed: permission_denied 
+    # Subtest: \#12 uA cannot create meta with wrong ownerUid, short $homeId, or schemaVersion=2
+    ok 2 - \#12 uA cannot create meta with wrong ownerUid, short $homeId, or schemaVersion=2
+      ---
+      duration_ms: 106.0841
+      ...
+# [2026-11-20T16:35:57.038Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta/name failed: permission_denied 
+    # Subtest: \#13 [ROW-10][F2] sibling update meta/name with createdAt in the past: uA ALLOW, uB DENY
+    ok 3 - \#13 [ROW-10][F2] sibling update meta/name with createdAt in the past: uA ALLOW, uB DENY
+      ---
+      duration_ms: 177.5376
+      ...
+# [2026-11-20T16:35:57.178Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta/ownerUid failed: permission_denied 
+# [2026-11-20T16:35:57.226Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta/ownerUid failed: permission_denied 
+# [2026-11-20T16:35:57.274Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta/ownerUid failed: permission_denied 
+# [2026-11-20T16:35:57.320Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta failed: permission_denied 
+# [2026-11-20T16:35:57.367Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001 failed: permission_denied 
+    # Subtest: \#14 uA/uB cannot modify meta/ownerUid or delete meta/home
+    ok 4 - \#14 uA/uB cannot modify meta/ownerUid or delete meta/home
+      ---
+      duration_ms: 328.5746
+      ...
+    # Subtest: \#15 uA adds member uB2 (members/uB2 then userHomes/uB2/home_A001)
+    ok 5 - \#15 uA adds member uB2 (members/uB2 then userHomes/uB2/home_A001)
+      ---
+      duration_ms: 117.9177
+      ...
+# [2026-11-20T16:35:57.600Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB2 failed: permission_denied 
+# [2026-11-20T16:35:57.603Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB failed: permission_denied 
+# [2026-11-20T16:35:57.606Z]  @firebase/database: FIREBASE WARNING: set at /userHomes/uD/home_A001 failed: permission_denied 
+    # Subtest: \#16 uA cannot add uB2 as owner, update existing members/uB, or add userHomes for non-member uD
+    ok 6 - \#16 uA cannot add uB2 as owner, update existing members/uB, or add userHomes for non-member uD
+      ---
+      duration_ms: 121.1443
+      ...
+# [2026-11-20T16:35:57.742Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB/role failed: permission_denied 
+# [2026-11-20T16:35:57.746Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB2 failed: permission_denied 
+    # Subtest: \#17 uB cannot escalate own role to owner or add another member
+    ok 7 - \#17 uB cannot escalate own role to owner or add another member
+      ---
+      duration_ms: 139.8157
+      ...
+# [2026-11-20T16:35:57.865Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uA failed: permission_denied 
+# [2026-11-20T16:35:57.869Z]  @firebase/database: FIREBASE WARNING: set at /userHomes/uA/home_A001 failed: permission_denied 
+    # Subtest: \#18 Owner uA cannot delete own membership or userHomes entry
+    ok 8 - \#18 Owner uA cannot delete own membership or userHomes entry
+      ---
+      duration_ms: 123.1237
+      ...
+    # Subtest: \#19 [ROW-05] uB self-leaves via multi-path atomic delete of members/uB and userHomes/uB/home_A001
+    ok 9 - \#19 [ROW-05] uB self-leaves via multi-path atomic delete of members/uB and userHomes/uB/home_A001
+      ---
+      duration_ms: 148.8213
+      ...
+# [2026-11-20T16:35:58.181Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_00099 failed: permission_denied 
+    # Subtest: \#20a [ROW-05] uA removes uB via multi-path atomic delete, then uB loses read/write access
+    ok 10 - \#20a [ROW-05] uA removes uB via multi-path atomic delete, then uB loses read/write access
+      ---
+      duration_ms: 163.1967
+      ...
+    # Subtest: \#20b [ROW-06][F1] Live listener on homes/home_A001/meta receives PERMISSION_DENIED after uB membership is revoked
+    ok 11 - \#20b [ROW-06][F1] Live listener on homes/home_A001/meta receives PERMISSION_DENIED after uB membership is revoked
+      ---
+      duration_ms: 203.4393
+      ...
+    # Subtest: \#21 Deleting only members/uB leaves userHomes readable but blocks homes/home_A001/meta
+    ok 12 - \#21 Deleting only members/uB leaves userHomes readable but blocks homes/home_A001/meta
+      ---
+      duration_ms: 163.4988
+      ...
+# [2026-11-20T16:35:58.733Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB2 failed: permission_denied 
+    # Subtest: \#22 Member uB cannot delete another member uB2
+    ok 13 - \#22 Member uB cannot delete another member uB2
+      ---
+      duration_ms: 185.1684
+      ...
+    1..13
+ok 3 - Group 3: Homes, Members & Live Listener Revocation (\#11-\#22)
+  ---
+  duration_ms: 2119.3623
+  type: 'suite'
+  ...
+# Subtest: Group 4: Devices, deviceAuthUid & revoked terminal policy (\#23-\#27)
+    # Subtest: \#23a [ROW-10][F2] sibling update on devices/dev_D1001/name with createdAt in the past succeeds
+    ok 1 - \#23a [ROW-10][F2] sibling update on devices/dev_D1001/name with createdAt in the past succeeds
+      ---
+      duration_ms: 107.5324
+      ...
+    # Subtest: \#23b uA creates dev_D4001, updates name, binds deviceAuthUid once, transitions status active->revoked
+    ok 2 - \#23b uA creates dev_D4001, updates name, binds deviceAuthUid once, transitions status active->revoked
+      ---
+      duration_ms: 122.4044
+      ...
+# [2026-11-20T16:35:59.044Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D3001/status failed: permission_denied 
+    # Subtest: \#23c [F9] uA cannot revert revoked device status back to active (terminal policy)
+    ok 3 - \#23c [F9] uA cannot revert revoked device status back to active (terminal policy)
+      ---
+      duration_ms: 79.9015
+      ...
+# [2026-11-20T16:35:59.165Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001/deviceAuthUid failed: permission_denied 
+# [2026-11-20T16:35:59.168Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001/deviceAuthUid failed: permission_denied 
+# [2026-11-20T16:35:59.171Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001 failed: permission_denied 
+    # Subtest: \#24 uA cannot overwrite existing deviceAuthUid, delete deviceAuthUid, or delete device
+    ok 4 - \#24 uA cannot overwrite existing deviceAuthUid, delete deviceAuthUid, or delete device
+      ---
+      duration_ms: 126.9576
+      ...
+# [2026-11-20T16:35:59.280Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D4002/deviceAuthUid failed: permission_denied 
+# [2026-11-20T16:35:59.284Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D4002/deviceAuthUid failed: permission_denied 
+# [2026-11-20T16:35:59.288Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D4002/deviceAuthUid failed: permission_denied 
+    # Subtest: \#25 [F2] On unbound dev_D4002 (no deviceAuthUid yet), setting deviceAuthUid to "", uA (owner), or uB (member) hits .validate and is DENY
+    ok 5 - \#25 [F2] On unbound dev_D4002 (no deviceAuthUid yet), setting deviceAuthUid to "", uA (owner), or uB (member) hits .validate and is DENY
+      ---
+      duration_ms: 121.4669
+      ...
+# [2026-11-20T16:35:59.387Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D4001 failed: permission_denied 
+# [2026-11-20T16:35:59.392Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001/name failed: permission_denied 
+# [2026-11-20T16:35:59.396Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001/status failed: permission_denied 
+# [2026-11-20T16:35:59.399Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D4002/deviceAuthUid failed: permission_denied 
+    # Subtest: \#26 Member uB cannot create or modify devices
+    ok 6 - \#26 Member uB cannot create or modify devices
+      ---
+      duration_ms: 106.7649
+      ...
+# [2026-11-20T16:35:59.513Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/d1 failed: permission_denied 
+# [2026-11-20T16:35:59.517Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D5001 failed: permission_denied 
+    # Subtest: \#27 uA cannot create device with short $deviceId or empty model
+    ok 7 - \#27 uA cannot create device with short $deviceId or empty model
+      ---
+      duration_ms: 118.0292
+      ...
+    1..7
+ok 4 - Group 4: Devices, deviceAuthUid & revoked terminal policy (\#23-\#27)
+  ---
+  duration_ms: 783.9441
+  type: 'suite'
+  ...
+# Subtest: Group 5: State, Partial Write & hasChildren() (\#28-\#33)
+    # Subtest: \#28 uB writes full valid state/gateway
+    ok 1 - \#28 uB writes full valid state/gateway
+      ---
+      duration_ms: 119.5364
+      ...
+    # Subtest: \#29 dev1 writes full valid state/device
+    ok 2 - \#29 dev1 writes full valid state/device
+      ---
+      duration_ms: 91.9352
+      ...
+# [2026-11-20T16:35:59.823Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway/values/temp failed: permission_denied 
+    # Subtest: \#30a [ROW-03][F2] Same author uA partial-writing state/gateway/values/temp with past receivedAt is DENY (proves receivedAt === now at parent .validate)
+    ok 3 - \#30a [ROW-03][F2] Same author uA partial-writing state/gateway/values/temp with past receivedAt is DENY (proves receivedAt === now at parent .validate)
+      ---
+      duration_ms: 93.1171
+      ...
+# [2026-11-20T16:35:59.931Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway/values/temp failed: permission_denied 
+    # Subtest: \#30b [ROW-03][F2] Different member uB partial-writing state/gateway/values/temp is DENY (reportedBy + receivedAt)
+    ok 4 - \#30b [ROW-03][F2] Different member uB partial-writing state/gateway/values/temp is DENY (reportedBy + receivedAt)
+      ---
+      duration_ms: 107.8865
+      ...
+# [2026-11-20T16:36:00.042Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/device/values/temp failed: permission_denied 
+    # Subtest: \#30c [ROW-03][F2] Device dev1 partial-writing state/device/values/temp with past receivedAt is DENY (proves state/device parent .validate)
+    ok 5 - \#30c [ROW-03][F2] Device dev1 partial-writing state/device/values/temp with past receivedAt is DENY (proves state/device parent .validate)
+      ---
+      duration_ms: 111.5385
+      ...
+# [2026-11-20T16:36:00.150Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/device failed: permission_denied 
+# [2026-11-20T16:36:00.196Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/device failed: permission_denied 
+# [2026-11-20T16:36:00.289Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+    # Subtest: \#31 Namespace isolation: uA/uB cannot write state/device; dev1 cannot read/write state/gateway
+    ok 6 - \#31 Namespace isolation: uA/uB cannot write state/device; dev1 cannot read/write state/gateway
+      ---
+      duration_ms: 246.8616
+      ...
+# [2026-11-20T16:36:00.396Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/device failed: permission_denied 
+# [2026-11-20T16:36:00.443Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_C001/deviceData/dev_D2001/state/device failed: permission_denied 
+    # Subtest: \#32 Cross-device isolation: dev2 cannot write dev_D1001; dev1 cannot write dev_D2001
+    ok 7 - \#32 Cross-device isolation: dev2 cannot write dev_D1001; dev1 cannot write dev_D2001
+      ---
+      duration_ms: 153.7648
+      ...
+# [2026-11-20T16:36:00.566Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:00.597Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/device failed: permission_denied 
+# [2026-11-20T16:36:00.600Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:00.602Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:00.605Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:00.608Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+    # Subtest: \#33 [ROW-08] Zero-arg newData.hasChildren() rejects scalar values on state/gateway and state/device, plus range/extra-field checks
+    ok 8 - \#33 [ROW-08] Zero-arg newData.hasChildren() rejects scalar values on state/gateway and state/device, plus range/extra-field checks
+      ---
+      duration_ms: 164.768
+      ...
+    1..8
+ok 5 - Group 5: State, Partial Write & hasChildren() (\#28-\#33)
+  ---
+  duration_ms: 1090.1121
+  type: 'suite'
+  ...
+# Subtest: Group 6: Config (\#34-\#36)
+    # Subtest: \#34 uA creates config (rev: 1) on new active device and increments to rev: 2
+    ok 1 - \#34 uA creates config (rev: 1) on new active device and increments to rev: 2
+      ---
+      duration_ms: 137.5923
+      ...
+# [2026-11-20T16:36:00.863Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/config failed: permission_denied 
+# [2026-11-20T16:36:00.910Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/config failed: permission_denied 
+    # Subtest: \#35 uB and dev1 cannot write config; dev1 can read config of dev_D1001
+    ok 2 - \#35 uB and dev1 cannot write config; dev1 can read config of dev_D1001
+      ---
+      duration_ms: 213.4824
+      ...
+# [2026-11-20T16:36:01.036Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/config failed: permission_denied 
+    # Subtest: \#36a [F2/F8] uA writing config with non-incrementing rev is DENY (isolated fixture)
+    ok 3 - \#36a [F2/F8] uA writing config with non-incrementing rev is DENY (isolated fixture)
+      ---
+      duration_ms: 76.234
+      ...
+# [2026-11-20T16:36:01.144Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/config failed: permission_denied 
+    # Subtest: \#36b [F2/F8] uA writing config with out-of-range tempLimit=999 is DENY (isolated fixture)
+    ok 4 - \#36b [F2/F8] uA writing config with out-of-range tempLimit=999 is DENY (isolated fixture)
+      ---
+      duration_ms: 108.0164
+      ...
+# [2026-11-20T16:36:01.253Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/config/tempLimit failed: permission_denied 
+    # Subtest: \#36c [ROW-03][F2/F8] uA partial-writing only config/tempLimit is DENY (parent config/.validate)
+    ok 5 - \#36c [ROW-03][F2/F8] uA partial-writing only config/tempLimit is DENY (parent config/.validate)
+      ---
+      duration_ms: 109.0673
+      ...
+    1..5
+ok 6 - Group 6: Config (\#34-\#36)
+  ---
+  duration_ms: 644.8496
+  type: 'suite'
+  ...
+# Subtest: Group 7: Commands & ACKs (\#37-\#43)
+    # Subtest: \#37 uB creates valid pending command cmd_00010
+    ok 1 - \#37 uB creates valid pending command cmd_00010
+      ---
+      duration_ms: 122.6998
+      ...
+# [2026-11-20T16:36:01.500Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad01 failed: permission_denied 
+# [2026-11-20T16:36:01.503Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad02 failed: permission_denied 
+# [2026-11-20T16:36:01.505Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad03 failed: permission_denied 
+# [2026-11-20T16:36:01.508Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad04 failed: permission_denied 
+# [2026-11-20T16:36:01.511Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad05 failed: permission_denied 
+# [2026-11-20T16:36:01.514Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad06 failed: permission_denied 
+# [2026-11-20T16:36:01.516Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_bad07 failed: permission_denied 
+# [2026-11-20T16:36:01.519Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/c1 failed: permission_denied 
+    # Subtest: \#38 [ROW-08] uB cannot create invalid commands (cancelled, forged createdBy, bad ttlMs, bad type, scalar params, empty mode, extra param, short cmdId)
+    ok 2 - \#38 [ROW-08] uB cannot create invalid commands (cancelled, forged createdBy, bad ttlMs, bad type, scalar params, empty mode, extra param, short cmdId)
+      ---
+      duration_ms: 143.4239
+      ...
+    # Subtest: \#39a [ROW-02][F6/F8] uB cancels own pending un-ACKed command on active device (verifies data.parent() + @ACTIVE)
+    ok 3 - \#39a [ROW-02][F6/F8] uB cancels own pending un-ACKed command on active device (verifies data.parent() + @ACTIVE)
+      ---
+      duration_ms: 119.8188
+      ...
+# [2026-11-20T16:36:01.747Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_00001/status failed: permission_denied 
+    # Subtest: \#39b [ROW-02][F8] uA cannot cancel uB command (data.parent().child(createdBy) !== auth.uid)
+    ok 4 - \#39b [ROW-02][F8] uA cannot cancel uB command (data.parent().child(createdBy) !== auth.uid)
+      ---
+      duration_ms: 107.4962
+      ...
+# [2026-11-20T16:36:01.891Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_00002/status failed: permission_denied 
+    # Subtest: \#39c [F8] uB cannot cancel own command once ACK exists (cmd_00002 has ACK)
+    ok 5 - \#39c [F8] uB cannot cancel own command once ACK exists (cmd_00002 has ACK)
+      ---
+      duration_ms: 144.4596
+      ...
+# [2026-11-20T16:36:01.998Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/commands/cmd_30001/status failed: permission_denied 
+    # Subtest: \#39d [F6][F8] uB cannot cancel own pending un-ACKed command on REVOKED device dev_D3001 (@ACTIVE at status/.write)
+    ok 6 - \#39d [F6][F8] uB cannot cancel own pending un-ACKed command on REVOKED device dev_D3001 (@ACTIVE at status/.write)
+      ---
+      duration_ms: 106.3514
+      ...
+# [2026-11-20T16:36:02.126Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/commands/cmd_dev01 failed: permission_denied 
+    # Subtest: \#40 dev1 reads commands and acks of dev_D1001 (ALLOW) and cannot write commands (DENY)
+    ok 7 - \#40 dev1 reads commands and acks of dev_D1001 (ALLOW) and cannot write commands (DENY)
+      ---
+      duration_ms: 128.2253
+      ...
+    # Subtest: \#41 dev1 creates valid ACK for existing cmd_00001 on dev_D1001
+    ok 8 - \#41 dev1 creates valid ACK for existing cmd_00001 on dev_D1001
+      ---
+      duration_ms: 118.2223
+      ...
+# [2026-11-20T16:36:02.338Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_00002 failed: permission_denied 
+# [2026-11-20T16:36:02.339Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_00002 failed: permission_denied 
+    # Subtest: \#42a [ROW-04][F2/F8] dev1 cannot overwrite or delete existing ACK cmd_00002 (create-only)
+    ok 9 - \#42a [ROW-04][F2/F8] dev1 cannot overwrite or delete existing ACK cmd_00002 (create-only)
+      ---
+      duration_ms: 94.7575
+      ...
+# [2026-11-20T16:36:02.448Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_99999 failed: permission_denied 
+    # Subtest: \#42b [F2/F8] dev1 cannot create ACK for nonexistent command cmd_99999
+    ok 10 - \#42b [F2/F8] dev1 cannot create ACK for nonexistent command cmd_99999
+      ---
+      duration_ms: 108.3361
+      ...
+# [2026-11-20T16:36:02.574Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_00001 failed: permission_denied 
+# [2026-11-20T16:36:02.623Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_00001 failed: permission_denied 
+# [2026-11-20T16:36:02.669Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/acks/cmd_00001 failed: permission_denied 
+    # Subtest: \#43 Spoofed ACK: uA, uB, and dev2 cannot write acks/cmd_00001 on dev_D1001
+    ok 11 - \#43 Spoofed ACK: uA, uB, and dev2 cannot write acks/cmd_00001 on dev_D1001
+      ---
+      duration_ms: 221.1513
+      ...
+    1..11
+ok 7 - Group 7: Commands & ACKs (\#37-\#43)
+  ---
+  duration_ms: 1415.8197
+  type: 'suite'
+  ...
+# Subtest: Group 8: Telemetry, Events & History Cleanup (\#44-\#50)
+    # Subtest: \#44 uB writes telemetry/*_g and dev1 writes telemetry/*_d
+    ok 1 - \#44 uB writes telemetry/*_g and dev1 writes telemetry/*_d
+      ---
+      duration_ms: 169.4855
+      ...
+# [2026-11-20T16:36:02.967Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201431_g failed: permission_denied 
+    # Subtest: \#45a [ROW-09][F2] Telemetry source mismatch reaches .validate: uB writes _g with source=device -> DENY
+    ok 2 - \#45a [ROW-09][F2] Telemetry source mismatch reaches .validate: uB writes _g with source=device -> DENY
+      ---
+      duration_ms: 128.6906
+      ...
+# [2026-11-20T16:36:03.112Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201431_d failed: permission_denied 
+    # Subtest: \#45b [ROW-09][F2] Telemetry source mismatch reaches .validate: dev1 writes _d with source=gateway -> DENY
+    ok 3 - \#45b [ROW-09][F2] Telemetry source mismatch reaches .validate: dev1 writes _d with source=gateway -> DENY
+      ---
+      duration_ms: 145.4775
+      ...
+# [2026-11-20T16:36:03.217Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201432_d failed: permission_denied 
+# [2026-11-20T16:36:03.264Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201433_g failed: permission_denied 
+# [2026-11-20T16:36:03.309Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201434_g failed: permission_denied 
+# [2026-11-20T16:36:03.355Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201435_g failed: permission_denied 
+# [2026-11-20T16:36:03.402Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201436_g failed: permission_denied 
+    # Subtest: \#45c Telemetry namespace & schema rejections (uB->_d, wrong reportedBy, scalar values, bad temp, dev1->_g, dev1 read)
+    ok 4 - \#45c Telemetry namespace & schema rejections (uB->_d, wrong reportedBy, scalar values, bad temp, dev1->_g, dev1 read)
+      ---
+      duration_ms: 337.962
+      ...
+    # Subtest: \#46 [ROW-07] uB writes events/g_s7_150 and dev1 writes events/d_s7_150 (string+number concat & %1===0)
+    ok 5 - \#46 [ROW-07] uB writes events/g_s7_150 and dev1 writes events/d_s7_150 (string+number concat & %1===0)
+      ---
+      duration_ms: 140.1766
+      ...
+# [2026-11-20T16:36:03.731Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_142 failed: permission_denied 
+    # Subtest: \#47a [ROW-04][F8] Duplicate create-only write on events/g_s7_142 is DENY (isolated fixture)
+    ok 6 - \#47a [ROW-04][F8] Duplicate create-only write on events/g_s7_142 is DENY (isolated fixture)
+      ---
+      duration_ms: 140.0305
+      ...
+# [2026-11-20T16:36:03.874Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_151 failed: permission_denied 
+    # Subtest: \#47b [ROW-07][F8] Non-integer seq=1.5 is rejected by (val() % 1 === 0) and eventId mismatch
+    ok 7 - \#47b [ROW-07][F8] Non-integer seq=1.5 is rejected by (val() % 1 === 0) and eventId mismatch
+      ---
+      duration_ms: 143.2182
+      ...
+# [2026-11-20T16:36:03.982Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/d_s7_160 failed: permission_denied 
+# [2026-11-20T16:36:04.013Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_160 failed: permission_denied 
+# [2026-11-20T16:36:04.061Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_161 failed: permission_denied 
+# [2026-11-20T16:36:04.107Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_162 failed: permission_denied 
+# [2026-11-20T16:36:04.154Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_163 failed: permission_denied 
+    # Subtest: \#47c [F8] Events validation rejects d_ prefix by uB, source mismatch, invalid stream, empty type, wrong reportedBy
+    ok 8 - \#47c [F8] Events validation rejects d_ prefix by uB, source mismatch, invalid stream, empty type, wrong reportedBy
+      ---
+      duration_ms: 279.5185
+      ...
+# [2026-11-20T16:36:04.279Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_170 failed: permission_denied 
+    # Subtest: \#48 dev1 cannot write events/g_* or read events
+    ok 9 - \#48 dev1 cannot write events/g_* or read events
+      ---
+      duration_ms: 171.3729
+      ...
+    # Subtest: \#49a [F2] Owner uA deletes exact leaf $recordId and $eventId (ALLOW), not parent node
+    ok 10 - \#49a [F2] Owner uA deletes exact leaf $recordId and $eventId (ALLOW), not parent node
+      ---
+      duration_ms: 186.63
+      ...
+# [2026-11-20T16:36:04.642Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201430_g failed: permission_denied 
+# [2026-11-20T16:36:04.686Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_142 failed: permission_denied 
+# [2026-11-20T16:36:04.721Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/telemetry/202611201430_d failed: permission_denied 
+# [2026-11-20T16:36:04.765Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/d_s7_143 failed: permission_denied 
+    # Subtest: \#49b [F2] Member uB and device dev1 cannot delete exact leaf $recordId or $eventId (DENY)
+    ok 11 - \#49b [F2] Member uB and device dev1 cannot delete exact leaf $recordId or $eventId (DENY)
+      ---
+      duration_ms: 252.5343
+      ...
+    # Subtest: \#50 Device dev1 cannot read user or home metadata nodes
+    ok 12 - \#50 Device dev1 cannot read user or home metadata nodes
+      ---
+      duration_ms: 100.7187
+      ...
+    1..12
+ok 8 - Group 8: Telemetry, Events & History Cleanup (\#44-\#50)
+  ---
+  duration_ms: 2196.7195
+  type: 'suite'
+  ...
+# [2026-11-20T16:36:04.990Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/state/device failed: permission_denied 
+# [2026-11-20T16:36:04.993Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/telemetry/202611201431_d failed: permission_denied 
+# [2026-11-20T16:36:04.997Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/acks/cmd_30001 failed: permission_denied 
+# [2026-11-20T16:36:05.000Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/events/d_s7_300 failed: permission_denied 
+# Subtest: Group 9: Revoked Device, deviceKey Guard, Timestamp & Queries (\#51-\#55)
+    # Subtest: \#51 [F2] Revoked device dev3 cannot read config/commands/acks or write state/telemetry/acks(pre-seeded cmd_30001)/events
+    ok 1 - \#51 [F2] Revoked device dev3 cannot read config/commands/acks or write state/telemetry/acks(pre-seeded cmd_30001)/events
+      ---
+      duration_ms: 133.8902
+      ...
+# [2026-11-20T16:36:05.122Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:05.169Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/config failed: permission_denied 
+# [2026-11-20T16:36:05.219Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/telemetry/202611201431_g failed: permission_denied 
+# [2026-11-20T16:36:05.263Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/commands/cmd_30002 failed: permission_denied 
+# [2026-11-20T16:36:05.319Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D3001/events/g_s7_301 failed: permission_denied 
+    # Subtest: \#52 [F2/F8] uA/uB cannot write state/gateway, config, telemetry, commands, events on revoked dev_D3001
+    ok 2 - \#52 [F2/F8] uA/uB cannot write state/gateway, config, telemetry, commands, events on revoked dev_D3001
+      ---
+      duration_ms: 319.1195
+      ...
+# [2026-11-20T16:36:05.451Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/meta/name failed: permission_denied 
+# [2026-11-20T16:36:05.496Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/devices/dev_D1001/name failed: permission_denied 
+# [2026-11-20T16:36:05.542Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_201 failed: permission_denied 
+# [2026-11-20T16:36:05.589Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/events/g_s7_202 failed: permission_denied 
+    # Subtest: \#53 [F2] deviceKey guard: literal in meta/name, devices/name, events/detail AND full new event payload with extra field deviceKey -> DENY
+    ok 3 - \#53 [F2] deviceKey guard: literal in meta/name, devices/name, events/detail AND full new event payload with extra field deviceKey -> DENY
+      ---
+      duration_ms: 270.1965
+      ...
+# [2026-11-20T16:36:05.714Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_T001/meta failed: permission_denied 
+# [2026-11-20T16:36:05.760Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_T002/meta failed: permission_denied 
+# [2026-11-20T16:36:05.791Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:05.824Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/deviceData/dev_D1001/state/gateway failed: permission_denied 
+# [2026-11-20T16:36:05.857Z]  @firebase/database: FIREBASE WARNING: set at /users/uA/updatedAt failed: permission_denied 
+# [2026-11-20T16:36:05.900Z]  @firebase/database: FIREBASE WARNING: set at /users/uA/updatedAt failed: permission_denied 
+# [2026-11-20T16:36:05.946Z]  @firebase/database: FIREBASE WARNING: set at /homes/home_A001/members/uB2 failed: permission_denied 
+    # Subtest: \#54 [ROW-01] Client clock offsets -10s and +60s are rejected (now === ServerValue.TIMESTAMP)
+    ok 4 - \#54 [ROW-01] Client clock offsets -10s and +60s are rejected (now === ServerValue.TIMESTAMP)
+      ---
+      duration_ms: 357.1027
+      ...
+    # Subtest: \#55 [ROW-11][F5] Indexed queries on events (receivedAt), commands (createdAt), and telemetry (orderByKey.limitToLast)
+    ok 5 - \#55 [ROW-11][F5] Indexed queries on events (receivedAt), commands (createdAt), and telemetry (orderByKey.limitToLast)
+      ---
+      duration_ms: 229.6332
+      ...
+    1..5
+ok 9 - Group 9: Revoked Device, deviceKey Guard, Timestamp & Queries (\#51-\#55)
+  ---
+  duration_ms: 1310.6197
+  type: 'suite'
+  ...
+1..9
+# tests 74
+# suites 9
+# pass 74
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12608.7623
+[32m[1m+ [22m[39m Script exited successfully (code 0)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  database:[22m[39m Stopping Database Emulator
+[33m[1m! [22m[39m Database Emulator has exited upon receiving signal: SIGINT
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+Exit Code: 0
+

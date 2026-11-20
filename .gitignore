@@ -33,3 +33,13 @@ dist/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Firebase RTDB Rules / Emulator & local backups
+cloud-rules/node_modules/
+cloud-rules/.firebase/
+firebase-debug.log*
+database-debug.log*
+ui-debug.log*
+backup/*
+!backup/README.md
+!backup/*.example.*

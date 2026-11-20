@@ -68,9 +68,13 @@ dependencies {
     implementation("com.google.mlkit:face-detection:16.1.6")
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
 
-    // Đăng nhập: Firebase Auth + Google Sign-In (Credential Manager)
+    // Đăng nhập & Cloud Foundation (RTDB): Firebase Auth + Firebase Realtime Database
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-database")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
@@ -78,6 +82,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20180813")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

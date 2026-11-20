@@ -1,0 +1,17 @@
+{
+  "name": "smarthomeai-cloud-rules",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Firebase RTDB Security Rules build & Emulator verification suite for SmartHomeAI (P1.1-B1)",
+  "scripts": {
+    "build:rules": "node build-rules.mjs",
+    "test:build": "node --test test/build-rules.test.mjs",
+    "test:rules": "node build-rules.mjs && node scripts/run-emulator.mjs"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.14.1",
+    "firebase-tools": "^13.29.1"
+  }
+}
