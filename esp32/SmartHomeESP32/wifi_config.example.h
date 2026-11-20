@@ -1,0 +1,5 @@
+#pragma once
+
+// Save your local copy as wifi_config.h. Git ignores that file.
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";

@@ -1,0 +1,35 @@
+# Local IDE and agent settings
+.idea/
+.codex/
+*.iml
+
+# Generated build files and local tools
+.gradle/
+.gradle-build/
+.gradle-wrapper-tools/
+.tooling/
+**/build/
+.cxx/
+.externalNativeBuild/
+*.log
+.local-archive/
+
+# Local machine configuration and credentials
+local.properties
+**/wifi_config.h
+app/google-services*.json
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+secrets.properties
+
+# Installers and release outputs
+dist/
+*.apk
+*.aab
+
+# Operating system files
+.DS_Store
+Thumbs.db
