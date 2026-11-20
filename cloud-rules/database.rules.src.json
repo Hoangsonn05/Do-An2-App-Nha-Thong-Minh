@@ -27,7 +27,7 @@
       "$uid": {
         ".read": "@AUTH && auth.uid === $uid",
         "$homeId": {
-          ".write": "@AUTH && ((!data.exists() && newData.val() === 'owner' && auth.uid === $uid && @OWNER) || (!data.exists() && newData.val() === 'member' && @OWNER && root.child('homes').child($homeId).child('members').child($uid).child('role').val() === 'member') || (!newData.exists() && data.val() === 'member' && (auth.uid === $uid || @OWNER)))",
+          ".write": "@AUTH && ((!data.exists() && newData.val() === 'owner' && auth.uid === $uid && @OWNER && root.child('homes').child($homeId).child('members').child($uid).child('role').val() === 'owner') || (!data.exists() && newData.val() === 'member' && @OWNER && root.child('homes').child($homeId).child('members').child($uid).child('role').val() === 'member') || (!newData.exists() && data.val() === 'member' && (auth.uid === $uid || @OWNER)))",
           ".validate": "newData.isString() && (newData.val() === 'owner' || newData.val() === 'member')"
         }
       }

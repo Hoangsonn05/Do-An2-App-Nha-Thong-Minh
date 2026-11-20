@@ -457,6 +457,22 @@ describe('Group 3: Homes, Members & Live Listener Revocation (#11-#22)', () => {
     await assertSucceeds(db.ref('userHomes/uA/home_N001').set('owner'));
   });
 
+  it('#11b [MIN-01] Owner cannot write userHomes/uA/homeId when homes/homeId/members/uA is missing', async () => {
+    // Pre-state: home_N004 does not exist.
+    // Target: userHomes/$uid/$homeId/.write requires homes/$homeId/members/$uid/role === 'owner'.
+    const db = dbFor('uA');
+    await assertSucceeds(
+      db.ref('homes/home_N004/meta').set({
+        name: 'Nha Thieu Member',
+        ownerUid: 'uA',
+        createdAt: SERVER_TS,
+        schemaVersion: 1
+      })
+    );
+    // Intentionally skip homes/home_N004/members/uA
+    await assertFails(db.ref('userHomes/uA/home_N004').set('owner'));
+  });
+
   it('#12 uA cannot create meta with wrong ownerUid, short $homeId, or schemaVersion=2', async () => {
     const db = dbFor('uA');
     await assertFails(
@@ -1260,7 +1276,10 @@ describe('Group 8: Telemetry, Events & History Cleanup (#44-#50)', () => {
     );
   });
 
-  it('#47b [ROW-07][F8] Non-integer seq=1.5 is rejected by (val() % 1 === 0) and eventId mismatch', async () => {
+  // MIN-05: `% 1 === 0` in seq/.validate is defense-in-depth because the $eventId regex
+  // (/^(g|d)_[A-Za-z0-9]{1,16}_[0-9]{1,10}$/) already disallows decimal points in the key
+  // and ties $eventId to `'g_' + stream + '_' + seq`.
+  it('#47b [ROW-07][F8][MIN-05] Non-integer seq=1.5 is rejected (eventId regex + defense-in-depth % 1 === 0)', async () => {
     await assertFails(
       dbFor('uB').ref('homes/home_A001/deviceData/dev_D1001/events/g_s7_151').set({
         type: 'door.opened',
@@ -1315,6 +1334,15 @@ describe('Group 8: Telemetry, Events & History Cleanup (#44-#50)', () => {
     );
     await assertSucceeds(
       dbFor('uA').ref('homes/home_A001/deviceData/dev_D1001/events/g_s7_142').remove()
+    );
+  });
+
+  it('#49c [MIN-05] Owner uA cannot delete parent telemetry or parent events container nodes', async () => {
+    await assertFails(
+      dbFor('uA').ref('homes/home_A001/deviceData/dev_D1001/telemetry').remove()
+    );
+    await assertFails(
+      dbFor('uA').ref('homes/home_A001/deviceData/dev_D1001/events').remove()
     );
   });
 
@@ -1518,7 +1546,14 @@ describe('Group 9: Revoked Device, deviceKey Guard, Timestamp & Queries (#51-#55
     // updatedAt on users/uA
     await assertFails(dbFor('uA').ref('users/uA/updatedAt').set(minus10s));
     await assertFails(dbFor('uA').ref('users/uA/updatedAt').set(plus60s));
-    // addedAt on members/uB2
+    // addedAt on members/uB2 (MIN-05: both -10s and +60s rejected)
+    await assertFails(
+      dbFor('uA').ref('homes/home_A001/members/uB2').set({
+        role: 'member',
+        addedAt: minus10s,
+        addedBy: 'uA'
+      })
+    );
     await assertFails(
       dbFor('uA').ref('homes/home_A001/members/uB2').set({
         role: 'member',

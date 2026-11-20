@@ -3,6 +3,7 @@ package com.example.smarthomeai.cloud
 import android.util.Log
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseException
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
@@ -53,9 +54,21 @@ class RtdbCloudRepository(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 activeMergeJob?.cancel()
-                val homeIds = snapshot.children
-                    .mapNotNull { it.key }
-                    .filter { RtdbPaths.isValidEntityId(it) }
+                val homeIds = try {
+                    snapshot.children
+                        .mapNotNull { it.key }
+                        .filter { RtdbPaths.isValidEntityId(it) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    val mapped = if (t is DatabaseException) {
+                        CloudError.InvalidData
+                    } else {
+                        CloudErrorMapper.mapException(t)
+                    }
+                    trySend(CloudResult.Err(mapped, t.message))
+                    return
+                }
 
                 if (homeIds.isEmpty()) {
                     trySend(CloudResult.Ok(emptyList()))
@@ -175,20 +188,26 @@ class RtdbCloudRepository(
         val membersRef = db.getReference(RtdbPaths.homeMembersPath(homeId))
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val members = snapshot.children.mapNotNull { child ->
-                    val memberUid = child.key ?: return@mapNotNull null
-                    val role = CloudRole.fromWire(child.child("role").getValue(String::class.java))
-                        ?: return@mapNotNull null
-                    val addedAt = child.child("addedAt").getValue(Long::class.java)
-                    val addedBy = child.child("addedBy").getValue(String::class.java)
-                    CloudMember(
-                        uid = memberUid,
-                        role = role,
-                        addedAt = addedAt,
-                        addedBy = addedBy
-                    )
+                try {
+                    val members = snapshot.children.mapNotNull { child ->
+                        parseMemberValues(
+                            uid = child.key,
+                            rawRole = child.child("role").value,
+                            rawAddedAt = child.child("addedAt").value,
+                            rawAddedBy = child.child("addedBy").value
+                        )
+                    }
+                    trySend(CloudResult.Ok(members))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    val mapped = if (t is DatabaseException) {
+                        CloudError.InvalidData
+                    } else {
+                        CloudErrorMapper.mapException(t)
+                    }
+                    trySend(CloudResult.Err(mapped, t.message))
                 }
-                trySend(CloudResult.Ok(members))
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -225,21 +244,31 @@ class RtdbCloudRepository(
                     val listener = object : ValueEventListener {
                         override fun onDataChange(snapshot: DataSnapshot) {
                             if (!cont.isActive) return
-                            if (!snapshot.exists()) {
-                                cont.resume(HomeMetaFetchResult.NotFound)
-                                return
-                            }
-                            val name = snapshot.child("name").getValue(String::class.java)
-                            val ownerUid = snapshot.child("ownerUid").getValue(String::class.java)
-                            if (name.isNullOrBlank() || ownerUid.isNullOrBlank()) {
-                                cont.resume(
-                                    HomeMetaFetchResult.Failed(
-                                        CloudError.InvalidData,
-                                        "Malformed home meta for $homeId"
+                            val result = try {
+                                if (!snapshot.exists()) {
+                                    HomeMetaFetchResult.NotFound
+                                } else {
+                                    parseHomeMetaValues(
+                                        homeId = homeId,
+                                        rawName = snapshot.child("name").value,
+                                        rawOwnerUid = snapshot.child("ownerUid").value
                                     )
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (t: Throwable) {
+                                val mapped = if (t is DatabaseException) {
+                                    CloudError.InvalidData
+                                } else {
+                                    CloudErrorMapper.mapException(t)
+                                }
+                                HomeMetaFetchResult.Failed(
+                                    mapped,
+                                    t.message ?: "Failed to parse home meta for $homeId"
                                 )
-                            } else {
-                                cont.resume(HomeMetaFetchResult.Found(homeId, name, ownerUid))
+                            }
+                            if (cont.isActive) {
+                                cont.resume(result)
                             }
                         }
 
@@ -273,5 +302,51 @@ class RtdbCloudRepository(
 
     companion object {
         private const val TAG = "RtdbCloudRepository"
+
+        internal fun safeString(raw: Any?): String? = raw as? String
+
+        internal fun safeLong(raw: Any?): Long? = when (raw) {
+            is Long -> raw
+            is Int -> raw.toLong()
+            is Short -> raw.toLong()
+            is Byte -> raw.toLong()
+            is Number -> raw.toDouble().takeIf { it.isFinite() }?.toLong()
+            else -> null
+        }
+
+        internal fun parseHomeMetaValues(
+            homeId: String,
+            rawName: Any?,
+            rawOwnerUid: Any?
+        ): HomeMetaFetchResult {
+            val name = safeString(rawName)
+            val ownerUid = safeString(rawOwnerUid)
+            return if (name.isNullOrBlank() || ownerUid.isNullOrBlank()) {
+                HomeMetaFetchResult.Failed(
+                    CloudError.InvalidData,
+                    "Malformed home meta for $homeId"
+                )
+            } else {
+                HomeMetaFetchResult.Found(homeId, name, ownerUid)
+            }
+        }
+
+        internal fun parseMemberValues(
+            uid: String?,
+            rawRole: Any?,
+            rawAddedAt: Any?,
+            rawAddedBy: Any?
+        ): CloudMember? {
+            if (uid.isNullOrBlank()) return null
+            val role = CloudRole.fromWire(safeString(rawRole)) ?: return null
+            val addedAt = safeLong(rawAddedAt)
+            val addedBy = safeString(rawAddedBy)
+            return CloudMember(
+                uid = uid,
+                role = role,
+                addedAt = addedAt,
+                addedBy = addedBy
+            )
+        }
     }
 }
