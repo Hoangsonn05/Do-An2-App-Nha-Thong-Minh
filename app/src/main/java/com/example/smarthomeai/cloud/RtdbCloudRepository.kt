@@ -103,7 +103,9 @@ class RtdbCloudRepository(
             return CloudResult.Unavailable
         }
         val currentUid = provider.uid
-            ?: return CloudResult.Err(CloudError.Unauthenticated, "User is not signed in.")
+        if (currentUid == null || !RtdbPaths.isValidUid(currentUid)) {
+            return CloudResult.Err(CloudError.Unauthenticated, "User is not signed in.")
+        }
 
         val metaPayload: Map<String, Any>
         val memberPayload: Map<String, Any>
@@ -174,7 +176,8 @@ class RtdbCloudRepository(
             close()
             return@callbackFlow
         }
-        if (provider.uid == null) {
+        val currentUid = provider.uid
+        if (currentUid == null || !RtdbPaths.isValidUid(currentUid)) {
             trySend(CloudResult.Err(CloudError.Unauthenticated, "User is not signed in."))
             close()
             return@callbackFlow

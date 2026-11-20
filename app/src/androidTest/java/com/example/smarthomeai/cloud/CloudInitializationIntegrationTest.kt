@@ -239,14 +239,75 @@ class CloudInitializationIntegrationTest {
         )
     }
 
+    @Test
+    fun rtdbRepository_withBlankOrInvalidUidOnInitializedApp_returnsUnauthenticatedWithoutTouchingEmulator() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val (app, db) = offlineIsolatedDatabase()
+        val invalidUids = listOf("", "   ", "bad/uid", "bad.uid", "bad#uid", "bad\$uid", "bad[uid]", " uA ")
+
+        for (badUid in invalidUids) {
+            val provider = FirebaseProvider(
+                context = context,
+                appResolver = { app },
+                databaseUrlResolver = { app.options.databaseUrl },
+                uidResolver = { badUid },
+                databaseResolver = { db }
+            )
+            val repo = RtdbCloudRepository(provider, timeoutMs = 500L)
+
+            val homesRes = repo.observeHomes().first()
+            val createRes = repo.createHome("Nha Invalid UID")
+            val membersRes = repo.observeMembers("home_A001").first()
+
+            assertTrue(
+                "Expected Unauthenticated from observeHomes for uid='$badUid', got $homesRes",
+                homesRes is CloudResult.Err && homesRes.error == CloudError.Unauthenticated
+            )
+            assertTrue(
+                "Expected Unauthenticated from createHome for uid='$badUid', got $createRes",
+                createRes is CloudResult.Err && createRes.error == CloudError.Unauthenticated
+            )
+            assertTrue(
+                "Expected Unauthenticated from observeMembers for uid='$badUid', got $membersRes",
+                membersRes is CloudResult.Err && membersRes.error == CloudError.Unauthenticated
+            )
+        }
+    }
+
+    @Test
+    fun rtdbRepository_whenLocalEmulatorUnavailable_failsCleanlyWithTimeoutAndNeverContactsProduction() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val (app, db) = unreachableEmulatorDatabase()
+        val provider = FirebaseProvider(
+            context = context,
+            appResolver = { app },
+            databaseUrlResolver = { app.options.databaseUrl },
+            uidResolver = { "uEmuUnavailable" },
+            databaseResolver = { db }
+        )
+
+        val repo = RtdbCloudRepository(provider, timeoutMs = 500L)
+        val result = repo.createHome("Nha Emu Unavailable")
+
+        assertTrue(
+            "Expected Timeout or Offline when local emulator port is unreachable, got $result",
+            result is CloudResult.Err &&
+                (result.error == CloudError.Timeout || result.error == CloudError.Offline)
+        )
+    }
+
     companion object {
         private const val EMULATOR_DUMMY_URL = "https://demo-smarthomeai-default-rtdb.firebaseio.com"
+        private const val UNREACHABLE_EMULATOR_PORT = 19999
 
         @Volatile
         private var offlinePair: Pair<FirebaseApp, FirebaseDatabase>? = null
 
         @Volatile
         private var onlinePair: Pair<FirebaseApp, FirebaseDatabase>? = null
+
+        @Volatile
+        private var unreachablePair: Pair<FirebaseApp, FirebaseDatabase>? = null
 
         private fun getOrInitApp(name: String): FirebaseApp {
             val context = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext
@@ -279,6 +340,16 @@ class CloudInitializationIntegrationTest {
             db.useEmulator("10.0.2.2", 9000)
             db.goOnline()
             return (app to db).also { onlinePair = it }
+        }
+
+        @Synchronized
+        private fun unreachableEmulatorDatabase(): Pair<FirebaseApp, FirebaseDatabase> {
+            unreachablePair?.let { return it }
+            val app = getOrInitApp("b2-isolated-unreachable")
+            val db = FirebaseDatabase.getInstance(app, EMULATOR_DUMMY_URL)
+            db.useEmulator("10.0.2.2", UNREACHABLE_EMULATOR_PORT)
+            db.goOnline()
+            return (app to db).also { unreachablePair = it }
         }
     }
 }

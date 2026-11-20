@@ -74,7 +74,9 @@ class FirebaseProvider internal constructor(
 
         private fun defaultUidResolver(app: FirebaseApp?): String? =
             if (app != null) {
-                kotlin.runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
+                kotlin.runCatching {
+                    FirebaseAuth.getInstance(app).currentUser?.uid?.takeIf { it.isNotBlank() }
+                }.getOrNull()
             } else {
                 null
             }
