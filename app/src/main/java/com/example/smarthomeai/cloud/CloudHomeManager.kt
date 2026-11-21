@@ -151,7 +151,7 @@ object CloudSessionSyncEvaluator {
                 nextObservedUid = null
             )
         }
-        if (!firebaseConfigured || cloudStatus == CloudStatus.UNAVAILABLE) {
+        if (!firebaseConfigured) {
             return CloudSessionSyncDecision(
                 shouldRequireReauth = false,
                 shouldRefreshUserEmail = false,
@@ -159,6 +159,11 @@ object CloudSessionSyncEvaluator {
             )
         }
         return when (cloudStatus) {
+            CloudStatus.UNAVAILABLE -> CloudSessionSyncDecision(
+                shouldRequireReauth = false,
+                shouldRefreshUserEmail = false,
+                nextObservedUid = prevObservedUid
+            )
             CloudStatus.SIGNED_OUT -> CloudSessionSyncDecision(
                 shouldRequireReauth = true,
                 shouldRefreshUserEmail = false,
