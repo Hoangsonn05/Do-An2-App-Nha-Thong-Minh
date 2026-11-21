@@ -34,7 +34,7 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
         }
         if (cloudBridge != null) {
             item {
-                CloudHomeBannerFromBridge(cloudBridge) { onNavigate("settings") }
+                CloudHomeBannerFromBridge(cloudBridge, onReauth = { onNavigate("login") }) { onNavigate("settings") }
             }
         }
         item { SecurityCard(state, onMode) }

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.smarthomeai.cloud.CloudComponents
 import com.example.smarthomeai.cloud.CloudFoundationFactory
 import com.example.smarthomeai.cloud.CloudHomeManager
+import com.example.smarthomeai.cloud.CloudSessionSyncEvaluator
 import com.example.smarthomeai.cloud.CloudUiBridgeRegistry
 import com.example.smarthomeai.cloud.CloudUiState
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,9 @@ class SmartHomeViewModel internal constructor(
     val firebaseConfigured get() = auth.configured
     private val cloudManager = CloudHomeManager(viewModelScope, cloudComponents.session, cloudComponents.repository, singleHomeMode = true)
     val cloudState: StateFlow<CloudUiState> = cloudManager.state
+    private val _reauthRequired = MutableStateFlow(false)
+    val reauthRequired: StateFlow<Boolean> = _reauthRequired.asStateFlow()
+    private var observedCloudUid: String? = null
     private var lastSample = 0L
     private var lastMotionAlert = 0L
     private var lastProximityAlert = 0L
@@ -47,6 +51,31 @@ class SmartHomeViewModel internal constructor(
 
     init {
         CloudUiBridgeRegistry.register(cloudManager)
+        viewModelScope.launch {
+            combine(
+                _loggedIn,
+                cloudManager.state.map { it.status to it.currentUid }.distinctUntilChanged()
+            ) { isLoggedIn, (status, uid) ->
+                Triple(isLoggedIn, status, uid)
+            }.distinctUntilChanged().collect { (isLoggedIn, status, uid) ->
+                val decision = CloudSessionSyncEvaluator.evaluate(
+                    firebaseConfigured = auth.configured,
+                    localLoggedIn = isLoggedIn,
+                    prevObservedUid = observedCloudUid,
+                    cloudStatus = status,
+                    cloudUid = uid
+                )
+                observedCloudUid = decision.nextObservedUid
+                _reauthRequired.value = decision.shouldRequireReauth
+                cloudManager.setReauthRequired(decision.shouldRequireReauth)
+                if (decision.shouldRefreshUserEmail) {
+                    val freshEmail = auth.currentEmail
+                    if (!freshEmail.isNullOrBlank()) {
+                        _state.update { it.copy(userEmail = freshEmail) }
+                    }
+                }
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) { val saved = storage.samples(); _state.update { it.copy(samples = (saved + it.samples).distinctBy { p -> p.timestamp }.sortedBy { p -> p.timestamp }) } }
         viewModelScope.launch(Dispatchers.IO) {
             _state.collectLatest { delay(500); storage.save(it) }
@@ -82,9 +111,11 @@ class SmartHomeViewModel internal constructor(
         }
     }
     private fun finishLogin(email: String) {
+        _reauthRequired.value = false
+        cloudManager.setReauthRequired(false)
         _state.update { it.copy(userEmail = email) }; _loggedIn.value = true; refresh()
     }
-    fun logout() { verifyLiveFace(null); cloudManager.onSignedOut(); auth.signOut(); _loggedIn.value = false; _state.update { it.copy(userEmail = null, esp32Online = false, commands = emptyMap(),faceDoorMessage=null) } }
+    fun logout() { verifyLiveFace(null); observedCloudUid = null; _reauthRequired.value = false; cloudManager.onSignedOut(); auth.signOut(); _loggedIn.value = false; _state.update { it.copy(userEmail = null, esp32Online = false, commands = emptyMap(),faceDoorMessage=null) } }
 
     fun selectCloudHome(homeId: String) = cloudManager.selectHome(homeId)
     fun createCloudHome(name: String) = cloudManager.createHome(name)

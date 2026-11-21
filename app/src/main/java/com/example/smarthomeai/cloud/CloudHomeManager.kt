@@ -53,7 +53,8 @@ data class CloudUiState(
     val membersErrorMessage: String? = null,
     val busy: Boolean = false,
     val revokedNotice: String? = null,
-    val feedback: CloudActionFeedback? = null
+    val feedback: CloudActionFeedback? = null,
+    val reauthRequired: Boolean = false
 ) {
     val selectedHome: CloudHome?
         get() = selectedHomeId?.let { id -> homes.firstOrNull { it.id == id } }
@@ -123,6 +124,71 @@ object CloudUiBridgeRegistry {
     }
 
     fun currentOrNull(): CloudUiBridge? = activeRef?.get()
+}
+
+    /**
+     * Pure evaluator output describing how SmartHomeViewModel should sync local session state
+     * with CloudSession/CloudHomeManager without disrupting LAN-first control.
+     */
+data class CloudSessionSyncDecision(
+    val shouldRequireReauth: Boolean,
+    val shouldRefreshUserEmail: Boolean,
+    val nextObservedUid: String?
+)
+
+object CloudSessionSyncEvaluator {
+    fun evaluate(
+        firebaseConfigured: Boolean,
+        localLoggedIn: Boolean,
+        prevObservedUid: String?,
+        cloudStatus: CloudStatus,
+        cloudUid: String?
+    ): CloudSessionSyncDecision {
+        if (!localLoggedIn) {
+            return CloudSessionSyncDecision(
+                shouldRequireReauth = false,
+                shouldRefreshUserEmail = false,
+                nextObservedUid = null
+            )
+        }
+        if (!firebaseConfigured || cloudStatus == CloudStatus.UNAVAILABLE) {
+            return CloudSessionSyncDecision(
+                shouldRequireReauth = false,
+                shouldRefreshUserEmail = false,
+                nextObservedUid = prevObservedUid
+            )
+        }
+        return when (cloudStatus) {
+            CloudStatus.SIGNED_OUT -> CloudSessionSyncDecision(
+                shouldRequireReauth = true,
+                shouldRefreshUserEmail = false,
+                nextObservedUid = null
+            )
+            CloudStatus.LOADING,
+            CloudStatus.EMPTY,
+            CloudStatus.READY,
+            CloudStatus.ACCESS_REVOKED,
+            CloudStatus.ERROR -> {
+                val validUid = cloudUid?.takeIf { it.isNotBlank() }
+                if (validUid != null) {
+                    val uidChanged = validUid != prevObservedUid
+                    CloudSessionSyncDecision(
+                        shouldRequireReauth = false,
+                        shouldRefreshUserEmail = uidChanged,
+                        nextObservedUid = validUid
+                    )
+                } else {
+                    // Cold start transient LOADING when currentUid is still null:
+                    // Do NOT mistake initial LOADING(uid=null) for SIGNED_OUT.
+                    CloudSessionSyncDecision(
+                        shouldRequireReauth = false,
+                        shouldRefreshUserEmail = false,
+                        nextObservedUid = prevObservedUid
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -266,6 +332,12 @@ class CloudHomeManager(
         }
     }
 
+    fun setReauthRequired(required: Boolean) {
+        _uiState.update { cur ->
+            if (cur.reauthRequired == required) cur else cur.copy(reauthRequired = required)
+        }
+    }
+
     /**
      * Synchronously invalidates the active session on explicit logout so UI state is cleared immediately
      * without waiting for asynchronous AuthStateListener delivery.
@@ -284,7 +356,7 @@ class CloudHomeManager(
         selfLeavingHomeId = null
         revokedHomeIds.clear()
         activeSelectedHomeId = null
-        _uiState.value = CloudUiState(status = CloudStatus.SIGNED_OUT)
+        _uiState.value = CloudUiState(status = CloudStatus.SIGNED_OUT, reauthRequired = false)
     }
 
     fun clear() {

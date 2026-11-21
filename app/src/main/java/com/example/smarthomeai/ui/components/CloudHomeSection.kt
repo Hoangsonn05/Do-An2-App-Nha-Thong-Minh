@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +28,7 @@ fun rememberActiveCloudBridge(): CloudUiBridge? = remember { CloudUiBridgeRegist
 fun CloudHomeBannerFromBridge(
     bridge: CloudUiBridge,
     singleHomeMode: Boolean = true,
+    onReauth: (() -> Unit)? = null,
     onOpenManagement: () -> Unit = {}
 ) {
     val cloudState by bridge.state.collectAsState()
@@ -37,7 +39,8 @@ fun CloudHomeBannerFromBridge(
         onRetry = bridge::retry,
         onDismissFeedback = bridge::dismissFeedback,
         onOpenManagement = onOpenManagement,
-        singleHomeMode = singleHomeMode
+        singleHomeMode = singleHomeMode,
+        onReauth = onReauth
     )
 }
 
@@ -71,7 +74,8 @@ fun CloudHomeBannerCard(
     onRetry: () -> Unit,
     onDismissFeedback: () -> Unit = {},
     onOpenManagement: () -> Unit = {},
-    singleHomeMode: Boolean = false
+    singleHomeMode: Boolean = false,
+    onReauth: (() -> Unit)? = null
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var showSwitchDialog by rememberSaveable { mutableStateOf(false) }
@@ -216,7 +220,20 @@ fun CloudHomeBannerCard(
                     }
                 }
             }
-            CloudStatus.UNAVAILABLE, CloudStatus.SIGNED_OUT, CloudStatus.LOADING -> Unit
+            CloudStatus.SIGNED_OUT -> {
+                if (onReauth != null) {
+                    Button(
+                        onClick = onReauth,
+                        enabled = !cloudState.busy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 44.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Đăng nhập lại")
+                    }
+                }
+            }
+            CloudStatus.UNAVAILABLE, CloudStatus.LOADING -> Unit
         }
     }
 
@@ -850,7 +867,11 @@ private fun statusLabel(state: CloudUiState, singleHomeMode: Boolean = false): S
 
 private fun statusDescription(state: CloudUiState, singleHomeMode: Boolean = false): String? = when (state.status) {
     CloudStatus.UNAVAILABLE -> "Ứng dụng chưa có cấu hình Cloud hợp lệ. Điều khiển ESP32 qua LAN vẫn hoạt động bình thường."
-    CloudStatus.SIGNED_OUT -> "Đăng nhập bằng tài khoản Firebase để đồng bộ danh sách nhà và thành viên."
+    CloudStatus.SIGNED_OUT -> if (state.reauthRequired) {
+        "Phiên đăng nhập Cloud đã kết thúc. Điều khiển LAN vẫn hoạt động."
+    } else {
+        "Đăng nhập bằng tài khoản Firebase để đồng bộ danh sách nhà và thành viên."
+    }
     CloudStatus.LOADING -> "Đang tải danh sách nhà cho tài khoản hiện tại…"
     CloudStatus.EMPTY -> if (singleHomeMode && state.hasOnlyMemberHomes) {
         "Tài khoản đang chỉ tham gia nhà được chia sẻ; chế độ chia sẻ nhiều thành viên hiện tạm hoãn. Bạn có thể tạo nhà riêng cho ESP32 của mình."
