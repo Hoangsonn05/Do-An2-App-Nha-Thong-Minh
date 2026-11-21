@@ -11,8 +11,8 @@
 | Hạng mục | Kết quả | Ghi chú |
 |---|---|---|
 | **Kết luận tổng thể** | **PASS (Đạt chuẩn tích hợp)** | 12/12 trục `A`–`L` đều đạt, toàn bộ bộ kiểm thử tự động PASS 100%, 0 lỗi Lint. |
-| **Lỗi có thật (`BUG`)** | **0** | `0 CRITICAL`, `0 HIGH`, `0 MEDIUM`, `0 LOW` |
-| **Rủi ro tiềm ẩn (`RISK`)** | **7** | Toàn bộ ở mức `LOW` (các tình huống biên thời gian thực/đồng hồ/race hẹp) |
+| **Lỗi có thật (`BUG`)** | **1 (đã khắc phục)** | `0 CRITICAL`, `0 HIGH`, `0 MEDIUM`, `1 LOW` (`RISK-04` được phân loại lại thành `BUG` mức `LOW` và đã vá + xác minh sau Audit) |
+| **Rủi ro tiềm ẩn (`RISK`)** | **6 còn lại** | Toàn bộ ở mức `LOW` (các tình huống biên thời gian thực/đồng hồ/race hẹp; `RISK-04` đã chuyển sang trạng thái đã khắc phục) |
 | **Thiếu bằng chứng (`UNVERIFIED`)** | **2** | Auth Google live trên `appaintm` & kiểm thử phần cứng ESP32 thật (`C1` / `B1-A2`) |
 | **Giới hạn cố định (`LIMITATION`)** | **4** | Do khóa `LOCKED` (`CD-2`, `CD-3`, `Storage.kt`) và kiến trúc `1 nhà – 1 thiết bị` |
 | **Cần người dùng duyệt (`USER_DECISION_REQUIRED`)** | **4** | Mở khóa `B1-D`, lịch test phần cứng `C1`, chính sách retention RTDB, `C4` Release Signing |
@@ -67,15 +67,15 @@ Baseline trước đợt tích hợp `F1`–`F5` là commit `0cea70f` (`checkpoi
 | `.\gradlew.bat :app:testDebugUnitTest --console=plain` | 197 tests (23 XML) | **PASS** | 197 tests, 0 failures, 0 errors, 0 skipped |
 | `.\gradlew.bat :app:lintDebug --console=plain` | — | **PASS** | 0 errors, 18 warnings (`16 GradleDependency`, `1 ModifierParameter`, `1 DiscouragedApi`) |
 | `.\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest --console=plain` | — | **PASS** | `BUILD SUCCESSFUL` |
-| `node scripts/run-emulator.mjs "..\gradlew.bat -p .. :app:connectedDebugAndroidTest --console=plain"` | 85 tests | **PASS** | 85/85 pass trên `Pixel_9_Pro_API_34(AVD) - 14`, 0 failed, 0 skipped |
+| `node scripts/run-emulator.mjs "..\gradlew.bat -p .. :app:connectedDebugAndroidTest --console=plain"` | 86 tests | **PASS** | 86/86 pass trên `Pixel_9_Pro_API_34(AVD) - 14`, 0 failed, 0 skipped |
 
-Chi tiết `connectedDebugAndroidTest` (85 tests từ `app/build/outputs/androidTest-results/connected`):
+Chi tiết `connectedDebugAndroidTest` (86 tests từ `app/build/outputs/androidTest-results/connected`):
 - `com.example.smarthomeai.AppSmokeTest`: `54`
 - `com.example.smarthomeai.cloud.CloudInitializationIntegrationTest`: `10`
 - `com.example.smarthomeai.cloud.CloudB3IntegrationTest`: `5`
 - `com.example.smarthomeai.cloud.CloudSingleOwnerUiTest`: `5`
 - `com.example.smarthomeai.cloud.CloudSettingsSingleOwnerUiTest`: `5`
-- `com.example.smarthomeai.cloud.CloudHybridViewUiTest`: `4`
+- `com.example.smarthomeai.cloud.CloudHybridViewUiTest`: `5`
 - `com.example.smarthomeai.cloud.CloudSessionUiTest`: `2`
 
 ---
@@ -110,11 +110,11 @@ Chi tiết `connectedDebugAndroidTest` (85 tests từ `app/build/outputs/android
 - **Đồng bộ `config` & `telemetry`:** `syncConfig` (`CloudGatewaySync.kt:413-473`) bỏ qua nếu giá trị không đổi, tự đọc lại và retry 1 lần khi `PermissionDenied` (`rev` tăng đơn điệu). `SmartHomeViewModel.kt:387-388` lấy mẫu `>= 60_000L` ms; `syncTelemetry` (`CloudGatewaySync.kt:475-499`) chỉ ghi tối đa 1 mẫu/phút UTC.
 - **`RISK-03` (LOW):** `RtdbDeviceRepository.resolveOrRegisterDevice` (`RtdbDeviceRepository.kt:58-90`) đọc `devicesRef` rồi mới `push().setValue(...)` (không transaction). Hai máy cùng đăng nhập 1 tài khoản Owner đăng ký lần đầu đồng thời trên `devices` rỗng có thể tạo 2 thiết bị `active` trong phiên đầu, trước khi các phiên sau hội tụ về bản ghi cũ nhất kèm cảnh báo.
 
-### Trục E — Cloud Fallback & LAN-first Isolation: **OK** *(1 `RISK` mức LOW)*
+### Trục E — Cloud Fallback & LAN-first Isolation: **OK** *(`RISK-04` đã được khắc phục)*
 - **Debounce & hủy tức thì:** `CloudFallbackObserver` (`CloudFallbackObserver.kt:70-78, 95-110, 263`) chờ `DEFAULT_FALLBACK_DEBOUNCE_MS = 5_000L` khi mất LAN rồi mới query và gắn 3 listener; khi `esp32Online == true`, `collectLatest` hủy ngay coroutine và xóa `_cloudSnapshot`.
 - **LAN thắng tuyệt đối & cô lập `network` Mutex:** `DataSourceResolver.resolve` (`DataSourceResolver.kt:38-46`) luôn trả `DataSource.LAN` khi `esp32Online == true`. `SmartHomeViewModel.network` (`SmartHomeViewModel.kt:40`) chỉ được dùng cho thao tác LAN; `CloudHomeManager`, `CloudGatewaySync`, `CloudFallbackObserver` chạy độc lập trên `Dispatchers.IO` (`SmartHomeViewModel.kt:58, 70`), không tham chiếu `network` hay `Esp32Client`.
-- **Chỉ đọc trên Cloud/Cache:** Mọi nút điều khiển phần cứng ở UI (`HomeScreen.kt:159, 186, 188, 220, 243`, `Components.kt:166`, `SecurityCard.kt:45, 52, 60`, `AlarmSettingsCard.kt:15`, `CameraScreens.kt:160, 266`) và ViewModel (`SmartHomeViewModel.kt:248, 273, 298, 320, 338, 357, 371`) đều khóa khi `esp32Online == false`. Không có luồng ghi ngược từ Cloud xuống ESP32.
-- **`RISK-04` (LOW):** `HomeScreen.kt:37-43` gọi `DataSourceResolver.resolve(...)` trong `remember(state.esp32Online, state.lastSeen, cloudSnapshot)` với `System.currentTimeMillis()`, nên nếu màn hình mở yên ngoại tuyến quá 5 phút mà các key không đổi thì nhãn `"Dữ liệu cũ"` không tự bật lại cho tới lần recomposition kế tiếp.
+- **Chỉ đọc trên Cloud/Cache:** Mọi nút điều khiển phần cứng ở UI (`HomeScreen.kt:189, 216, 218, 250, 273`, `Components.kt:166`, `SecurityCard.kt:45, 52, 60`, `AlarmSettingsCard.kt:15`, `CameraScreens.kt:160, 266`) và ViewModel (`SmartHomeViewModel.kt:248, 273, 298, 320, 338, 357, 371`) đều khóa khi `esp32Online == false`. Không có luồng ghi ngược từ Cloud xuống ESP32.
+- **`RISK-04` (`BUG` LOW – ĐÃ KHẮC PHỤC):** Trước đây `HomeScreen.kt` chỉ tính `DataSourceResolver.resolve(...)` trong `remember(...)` mà không cập nhật `nowMs` theo thời gian. Đã bổ sung `LaunchedEffect` + `nowMs` ticker theo chu kỳ tối đa `30_000L` ms cho đến mốc `updatedAt + STALE_THRESHOLD_MS + 1L` (`HomeScreen.kt:38-73`), kèm test `homeScreen_whenIdleOfflineOverFiveMinutes_automaticallyShowsStaleBadge` (`CloudHybridViewUiTest.kt:262-301`).
 
 ### Trục F — Data Consistency & Event Idempotency: **OK** *(1 `RISK` mức LOW)*
 - **Create-only không kẹt cursor:** `RtdbDeviceRepository.writeCreateOnly` (`RtdbDeviceRepository.kt:465-503`) khi gặp `PermissionDenied` đều kiểm tra lại `readSingleSnapshot(ref)` và trả `CreateOnlyWriteOutcome.ALREADY_EXISTS` nếu node đã tồn tại → `CloudGatewaySync.syncEvents` (`CloudGatewaySync.kt:528-536`) và `syncTelemetry` (`CloudGatewaySync.kt:491-495`) vẫn tiến con trỏ bình thường.
@@ -162,7 +162,7 @@ Chi tiết `connectedDebugAndroidTest` (85 tests từ `app/build/outputs/android
 | `RISK-01` | A | `RISK` | `LOW` | `rememberActiveCloudBridge()` / `rememberActiveCloudDeviceBridge()` cache `null` nếu compose trước khi bridge đăng ký | `CloudHomeSection.kt:25`, `CloudDeviceUiBridge.kt:66-67` | Giữ nguyên (an toàn với `MainActivity.kt:46-95`), lưu ý nếu tách screen test |
 | `RISK-02` | C | `RISK` | `LOW` | `CloudError.Unauthenticated` từ `RtdbDeviceRepository` chưa tự kích `CloudHomeManager` bật `reauthRequired` ngay nếu đến trước `AuthStateListener` | `CloudFallbackObserver.kt:188-191`, `CloudGatewaySync.kt:701-736` | Có thể nối callback báo lỗi `Unauthenticated` về `CloudHomeManager` ở vòng cải tiến sau |
 | `RISK-03` | D | `RISK` | `LOW` | `resolveOrRegisterDevice` đọc rồi mới ghi `push()` (không transaction), 2 máy cùng Owner đăng ký lần đầu song song có thể tạo 2 device `active` | `RtdbDeviceRepository.kt:58-90` | Giữ cơ chế cảnh báo + chọn device cũ nhất; theo dõi khi audit Production |
-| `RISK-04` | E | `RISK` | `LOW` | `HomeScreen` tính `DataSourceResolver.resolve` trong `remember(...)` không tick theo thời gian, màn hình đứng yên > 5 phút offline chưa tự hiện badge `"Dữ liệu cũ"` | `HomeScreen.kt:37-43` | Có thể thêm ticker 30–60s khi đang ở `CLOUD`/`LOCAL_CACHE` ở vòng UI sau |
+| `RISK-04` | E | `BUG` (đã khắc phục) | `LOW` | `HomeScreen` tính `DataSourceResolver.resolve` trong `remember(...)` không tick theo thời gian khi đứng yên > 5 phút offline | `HomeScreen.kt:38-73`, `CloudHybridViewUiTest.kt:262-301` | **ĐÃ KHẮC PHỤC:** Bổ sung `nowMs` + `LaunchedEffect` ticker tới `STALE_THRESHOLD_MS`; đã xác minh bằng 86/86 instrumented tests PASS |
 | `RISK-05` | F | `RISK` | `LOW` | Lệch đồng hồ giữa điện thoại (`nowMs`/`localLastSeen`) và server (`receivedAt`) ảnh hưởng so sánh tuổi dữ liệu & chọn `LOCAL_CACHE` vs `CLOUD` | `DataSourceResolver.kt:10-16, 50-52` | Chấp nhận theo thiết kế (`ServerValue.TIMESTAMP` luôn đúng cho RTDB; `gateway.online == false` vẫn đánh dấu cũ) |
 | `RISK-06` | G | `RISK` | `LOW` | Cửa sổ race rất hẹp giữa `onSignedOut()` (không giữ `lifecycleMutex`) với `applySessionState` / `_uiState.value =` ngoài khối atomic | `CloudHomeManager.kt:261-295, 350-365, 626-633, 728-750` | Nếu sau này chuẩn hóa concurrency, chuyển sang `_uiState.update` và kiểm tra `sessionGen` sau `cancelAndJoin()` |
 | `RISK-07` | K | `RISK` | `LOW` | Chưa có auto-retention/xóa dữ liệu cũ cho `telemetry` (~1.440 mẫu/ngày) và `events` trên RTDB | `CloudGatewaySync.kt:475-499`, `database.rules.src.json:198, 259` | Cần người dùng chốt chính sách ở `UDR-03` |
@@ -186,7 +186,7 @@ Chi tiết `connectedDebugAndroidTest` (85 tests từ `app/build/outputs/android
 
 ## 8. Đề xuất sửa lỗi theo cụm (Clustered Remediation)
 
-- **Không có cụm `BUG` nào cần vá khẩn trước `C1`:** Tổng số `BUG` ghi nhận là **0**.
-- Nếu người dùng muốn xử lý phòng ngừa các `RISK` mức `LOW` trước khi mở rộng thêm tính năng trong tương lai, có thể gom thành tối đa **1–2 cụm nhẹ (tùy chọn, không bắt buộc cho nghiệm thu `C1`)**:
+- **Đã xử lý cụm lỗi phát hiện sau Audit:** `RISK-04` (phân loại lại thành `BUG` mức `LOW`) đã được vá trong `HomeScreen.kt` và kiểm chứng qua `CloudHybridViewUiTest` (86/86 Android instrumented tests PASS, 197/197 JVM unit tests PASS, 0 lỗi Lint). Không còn `BUG` tồn đọng trước `C1`.
+- Nếu người dùng muốn xử lý phòng ngừa các `RISK` mức `LOW` còn lại trước khi mở rộng thêm tính năng trong tương lai, còn lại **1 cụm nhẹ (tùy chọn, không bắt buộc cho nghiệm thu `C1`)**:
   - **Cụm tùy chọn 1 (`CloudHomeManager` / Session Edge):** Siết `sessionGen` atomic `_uiState.update` trong `CloudHomeManager.kt` (`RISK-06`) và nối tín hiệu `CloudError.Unauthenticated` từ `RtdbDeviceRepository` sang `CloudHomeManager` (`RISK-02`).
-  - **Cụm tùy chọn 2 (`HomeScreen` Stale Ticker):** Thêm `LaunchedEffect` tick mỗi 30–60s khi đang hiển thị nguồn `CLOUD`/`LOCAL_CACHE` trong `HomeScreen.kt` (`RISK-04`).
+  - ~~**Cụm tùy chọn 2 (`HomeScreen` Stale Ticker):**~~ **Đã hoàn tất & xác minh.**

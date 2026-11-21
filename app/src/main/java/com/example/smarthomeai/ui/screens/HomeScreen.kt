@@ -6,8 +6,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -22,6 +26,7 @@ import com.example.smarthomeai.cloud.rememberActiveCloudDeviceBridge
 import com.example.smarthomeai.data.*
 import com.example.smarthomeai.ui.components.*
 import com.example.smarthomeai.ui.theme.*
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit,
@@ -34,12 +39,41 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
     } else {
         null
     }
-    val resolvedSource = remember(state.esp32Online, state.lastSeen, cloudSnapshot) {
+    var nowMs by remember(state.esp32Online, state.lastSeen, cloudSnapshot) {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+    val resolvedSource = remember(state.esp32Online, state.lastSeen, cloudSnapshot, nowMs) {
         DataSourceResolver.resolve(
             esp32Online = state.esp32Online,
             localLastSeen = state.lastSeen,
-            snapshot = cloudSnapshot
+            snapshot = cloudSnapshot,
+            nowMs = nowMs
         )
+    }
+    LaunchedEffect(state.esp32Online, state.lastSeen, cloudSnapshot) {
+        val initialResolved = DataSourceResolver.resolve(
+            esp32Online = state.esp32Online,
+            localLastSeen = state.lastSeen,
+            snapshot = cloudSnapshot,
+            nowMs = nowMs
+        )
+        val updatedAt = initialResolved.updatedAt ?: return@LaunchedEffect
+        while (!state.esp32Online && !DataSourceResolver.resolve(
+                esp32Online = state.esp32Online,
+                localLastSeen = state.lastSeen,
+                snapshot = cloudSnapshot,
+                nowMs = nowMs
+            ).isStale
+        ) {
+            val remainingMs = (updatedAt + DataSourceResolver.STALE_THRESHOLD_MS + 1L) - nowMs
+            if (remainingMs <= 0L) {
+                nowMs = maxOf(System.currentTimeMillis(), updatedAt + DataSourceResolver.STALE_THRESHOLD_MS + 1L)
+                break
+            }
+            val stepMs = minOf(remainingMs, 30_000L)
+            delay(stepMs)
+            nowMs = maxOf(System.currentTimeMillis(), nowMs + stepMs)
+        }
     }
     val cloudFallbackSnapshot = cloudSnapshot?.takeIf { resolvedSource.source == DataSource.CLOUD }
 

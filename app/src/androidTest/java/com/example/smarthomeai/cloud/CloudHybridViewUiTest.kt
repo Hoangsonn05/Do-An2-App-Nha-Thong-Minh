@@ -260,6 +260,49 @@ class CloudHybridViewUiTest {
     }
 
     @Test
+    fun homeScreen_whenIdleOfflineOverFiveMinutes_automaticallyShowsStaleBadge() {
+        val now = System.currentTimeMillis()
+        val offlineState = SmartHomeState(
+            esp32Online = false,
+            lastSeen = now - 600_000L,
+            temperature = 21,
+            humidity = 50
+        )
+        val cloudSnapshot = CloudDeviceSnapshot(
+            deviceId = "esp32_gw_01",
+            gatewayState = GatewayStateSnapshot(
+                online = true,
+                receivedAt = now - 30_000L,
+                temp = 31,
+                hum = 70
+            )
+        )
+        val deviceBridge = fakeDeviceBridge(snapshotFlow = MutableStateFlow(cloudSnapshot))
+
+        compose.setContent {
+            SmartHomeTheme {
+                HomeScreen(
+                    state = offlineState,
+                    onSetDevice = { _, _ -> },
+                    onMode = {},
+                    onRefresh = {},
+                    onNavigate = {},
+                    cloudBridge = null,
+                    deviceBridge = deviceBridge
+                )
+            }
+        }
+
+        compose.onNodeWithText("Nguồn: Cloud (chỉ đọc)").assertIsDisplayed()
+        compose.onNodeWithText("Dữ liệu cũ").assertDoesNotExist()
+
+        compose.mainClock.advanceTimeBy(300_000L)
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Dữ liệu cũ").assertIsDisplayed()
+    }
+
+    @Test
     fun cloudHomeBanner_displaysGatewaySyncPhases_andMultiDeviceWarning_andRetryCallback() {
         val now = System.currentTimeMillis()
         val readyCloudState = CloudUiState(
