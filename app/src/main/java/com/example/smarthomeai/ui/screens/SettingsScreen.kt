@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.example.smarthomeai.cloud.CloudUiBridge
 import com.example.smarthomeai.data.*
 import com.example.smarthomeai.ui.components.*
 import com.example.smarthomeai.ui.theme.*
@@ -21,7 +22,8 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
                    onRefresh: () -> Unit, onBack: () -> Unit, onNavigate: (String) -> Unit,
                    onConnection: (String, String) -> Unit = { ip, _ -> onIpChange(ip) },
                    onEnvironmentConfig: (Boolean, Int, Int, Int) -> Unit = { _, _, _, _ -> },
-                   onDoorReminder: (Boolean) -> Unit = {}) {
+                   onDoorReminder: (Boolean) -> Unit = {},
+                   cloudBridge: CloudUiBridge? = rememberActiveCloudBridge()) {
     var showIp by rememberSaveable { mutableStateOf(false) }
     var ip by rememberSaveable(state.esp32Ip) { mutableStateOf(state.esp32Ip) }
     var deviceKey by rememberSaveable(state.deviceKey) { mutableStateOf(state.deviceKey) }
@@ -56,6 +58,9 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
                         state.doorReminderEnabled, onDoorReminder)
                 }
             }
+        }
+        if (cloudBridge != null) {
+            item { CloudHomeManagementFromBridge(cloudBridge) }
         }
         item {
             SectionTitle("Thành viên", action = "Thêm") { onNavigate("register") }

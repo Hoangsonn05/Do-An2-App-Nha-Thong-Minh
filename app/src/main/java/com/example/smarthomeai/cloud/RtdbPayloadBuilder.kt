@@ -51,4 +51,17 @@ object RtdbPayloadBuilder {
     }
 
     fun buildUserHomeRoleValue(role: CloudRole): String = role.wireValue
+
+    /**
+     * Builds the root-level multi-path atomic delete map for Leave Home and Remove Member (B0 §6.7, B3.3).
+     * Atomically clears both homes/{homeId}/members/{memberUid} and userHomes/{memberUid}/{homeId}.
+     */
+    fun buildRemoveMembershipUpdates(homeId: String, memberUid: String): Map<String, Any?> {
+        val memberPath = RtdbPaths.homeMemberPath(homeId, memberUid)
+        val userHomePath = RtdbPaths.userHomePath(memberUid, homeId)
+        return mapOf(
+            memberPath to null,
+            userHomePath to null
+        )
+    }
 }

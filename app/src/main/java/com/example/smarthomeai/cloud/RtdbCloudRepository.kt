@@ -20,15 +20,18 @@ import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 
 /**
- * Firebase Realtime Database implementation of CloudRepository (P1.1-B1).
+ * Firebase Realtime Database implementation of CloudRepository (P1.1-B1 + P1.1-B3).
  *
- * Implements only the 3 B1 APIs: observeHomes, createHome, observeMembers.
- * Never wraps continuous callbackFlow observers with withTimeout.
- * Only converts TimeoutCancellationException to CloudError.Timeout; other CancellationExceptions propagate.
+ * - Bounded parallel home metadata fetch with aggregate timeout (MIN-04).
+ * - UID consistency guard against stale emissions during account switch (B2-F5).
+ * - Multi-path atomic delete for leaveHome and removeMember (B3.3).
+ * - Never wraps continuous callbackFlow observers with withTimeout.
+ * - Only converts TimeoutCancellationException to CloudError.Timeout; other CancellationExceptions propagate.
  */
 class RtdbCloudRepository(
     private val provider: FirebaseProvider,
     private val timeoutMs: Long = CLOUD_OPERATION_TIMEOUT_MS,
+    private val maxConcurrentMetaFetches: Int = MAX_CONCURRENT_META_FETCHES,
     private val orphanHomeLogger: (homeId: String, step: String, error: CloudError) -> Unit = { homeId, step, error ->
         Log.w(TAG, "createHome failed at step=$step ($error); orphan homeId=$homeId")
     }
@@ -76,11 +79,19 @@ class RtdbCloudRepository(
                 }
 
                 activeMergeJob = launch {
-                    val metaResults = mutableMapOf<String, HomeMetaFetchResult>()
-                    for (homeId in homeIds) {
-                        metaResults[homeId] = fetchHomeMeta(db, homeId)
+                    val metaResults = RtdbHomeMetaFetcher.fetchAllBounded(
+                        homeIds = homeIds,
+                        maxConcurrency = maxConcurrentMetaFetches,
+                        aggregateTimeoutMs = timeoutMs
+                    ) { homeId ->
+                        fetchHomeMeta(db, homeId)
                     }
-                    trySend(RtdbHomeMerger.mergeHomes(currentUid, homeIds, metaResults))
+                    // Defense-in-depth (B2-F5): never emit results if Auth UID changed while fetching.
+                    if (provider.uid != currentUid) {
+                        return@launch
+                    }
+                    val report = RtdbHomeMerger.mergeHomesDetailed(currentUid, homeIds, metaResults)
+                    trySend(report.toCloudResult())
                 }
             }
 
@@ -223,6 +234,54 @@ class RtdbCloudRepository(
         awaitClose { membersRef.removeEventListener(listener) }
     }
 
+    override suspend fun leaveHome(homeId: String): CloudResult<Unit> {
+        val db = provider.databaseOrNull()
+        if (!provider.isConfigured || db == null) {
+            return CloudResult.Unavailable
+        }
+        val currentUid = provider.uid
+        if (currentUid == null || !RtdbPaths.isValidUid(currentUid)) {
+            return CloudResult.Err(CloudError.Unauthenticated, "User is not signed in.")
+        }
+        val updates = try {
+            RtdbPayloadBuilder.buildRemoveMembershipUpdates(homeId = homeId, memberUid = currentUid)
+        } catch (e: IllegalArgumentException) {
+            return CloudResult.Err(CloudError.InvalidData, e.message)
+        }
+
+        val err = runTimedWrite {
+            db.reference.updateChildren(updates).await()
+        }
+        return err ?: CloudResult.Ok(Unit)
+    }
+
+    override suspend fun removeMember(homeId: String, memberUid: String): CloudResult<Unit> {
+        val db = provider.databaseOrNull()
+        if (!provider.isConfigured || db == null) {
+            return CloudResult.Unavailable
+        }
+        val currentUid = provider.uid
+        if (currentUid == null || !RtdbPaths.isValidUid(currentUid)) {
+            return CloudResult.Err(CloudError.Unauthenticated, "User is not signed in.")
+        }
+        val updates = try {
+            RtdbPayloadBuilder.buildRemoveMembershipUpdates(homeId = homeId, memberUid = memberUid)
+        } catch (e: IllegalArgumentException) {
+            return CloudResult.Err(CloudError.InvalidData, e.message)
+        }
+        if (memberUid == currentUid) {
+            return CloudResult.Err(
+                CloudError.PermissionDenied,
+                "Cannot remove yourself via removeMember; members must use leaveHome and owners cannot self-delete."
+            )
+        }
+
+        val err = runTimedWrite {
+            db.reference.updateChildren(updates).await()
+        }
+        return err ?: CloudResult.Ok(Unit)
+    }
+
     private suspend fun runTimedWrite(block: suspend () -> Unit): CloudResult.Err? {
         return try {
             withTimeout(timeoutMs) { block() }
@@ -241,53 +300,51 @@ class RtdbCloudRepository(
         homeId: String
     ): HomeMetaFetchResult {
         return try {
-            withTimeout(timeoutMs) {
-                suspendCancellableCoroutine { cont ->
-                    val ref = db.getReference(RtdbPaths.homeMetaPath(homeId))
-                    val listener = object : ValueEventListener {
-                        override fun onDataChange(snapshot: DataSnapshot) {
-                            if (!cont.isActive) return
-                            val result = try {
-                                if (!snapshot.exists()) {
-                                    HomeMetaFetchResult.NotFound
-                                } else {
-                                    parseHomeMetaValues(
-                                        homeId = homeId,
-                                        rawName = snapshot.child("name").value,
-                                        rawOwnerUid = snapshot.child("ownerUid").value
-                                    )
-                                }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (t: Throwable) {
-                                val mapped = if (t is DatabaseException) {
-                                    CloudError.InvalidData
-                                } else {
-                                    CloudErrorMapper.mapException(t)
-                                }
-                                HomeMetaFetchResult.Failed(
-                                    mapped,
-                                    t.message ?: "Failed to parse home meta for $homeId"
+            suspendCancellableCoroutine { cont ->
+                val ref = db.getReference(RtdbPaths.homeMetaPath(homeId))
+                val listener = object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        if (!cont.isActive) return
+                        val result = try {
+                            if (!snapshot.exists()) {
+                                HomeMetaFetchResult.NotFound
+                            } else {
+                                parseHomeMetaValues(
+                                    homeId = homeId,
+                                    rawName = snapshot.child("name").value,
+                                    rawOwnerUid = snapshot.child("ownerUid").value
                                 )
                             }
-                            if (cont.isActive) {
-                                cont.resume(result)
-                            }
-                        }
-
-                        override fun onCancelled(error: DatabaseError) {
-                            if (!cont.isActive) return
-                            val mapped = CloudErrorMapper.mapDatabaseError(error)
-                            if (mapped == CloudError.PermissionDenied) {
-                                cont.resume(HomeMetaFetchResult.PermissionDenied)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (t: Throwable) {
+                            val mapped = if (t is DatabaseException) {
+                                CloudError.InvalidData
                             } else {
-                                cont.resume(HomeMetaFetchResult.Failed(mapped, error.message))
+                                CloudErrorMapper.mapException(t)
                             }
+                            HomeMetaFetchResult.Failed(
+                                mapped,
+                                t.message ?: "Failed to parse home meta for $homeId"
+                            )
+                        }
+                        if (cont.isActive) {
+                            cont.resume(result)
                         }
                     }
-                    ref.addListenerForSingleValueEvent(listener)
-                    cont.invokeOnCancellation { ref.removeEventListener(listener) }
+
+                    override fun onCancelled(error: DatabaseError) {
+                        if (!cont.isActive) return
+                        val mapped = CloudErrorMapper.mapDatabaseError(error)
+                        if (mapped == CloudError.PermissionDenied) {
+                            cont.resume(HomeMetaFetchResult.PermissionDenied)
+                        } else {
+                            cont.resume(HomeMetaFetchResult.Failed(mapped, error.message))
+                        }
+                    }
                 }
+                ref.addListenerForSingleValueEvent(listener)
+                cont.invokeOnCancellation { ref.removeEventListener(listener) }
             }
         } catch (e: TimeoutCancellationException) {
             HomeMetaFetchResult.Failed(CloudError.Timeout, e.message ?: "Timed out reading home meta.")

@@ -95,4 +95,37 @@ class RtdbPayloadBuilderTest {
         assertFalse(combined.contains(sampleLanDeviceKey))
         assertFalse(combined.contains("deviceKey", ignoreCase = true))
     }
+
+    @Test
+    fun buildRemoveMembershipUpdates_buildsExactTwoPathAtomicNullMap() {
+        val updates = RtdbPayloadBuilder.buildRemoveMembershipUpdates(
+            homeId = "home_A001",
+            memberUid = "uB_member_1"
+        )
+        assertEquals(
+            setOf(
+                "homes/home_A001/members/uB_member_1",
+                "userHomes/uB_member_1/home_A001"
+            ),
+            updates.keys
+        )
+        assertEquals(null, updates["homes/home_A001/members/uB_member_1"])
+        assertEquals(null, updates["userHomes/uB_member_1/home_A001"])
+    }
+
+    @Test
+    fun buildRemoveMembershipUpdates_rejectsInvalidIds() {
+        try {
+            RtdbPayloadBuilder.buildRemoveMembershipUpdates("short", "uB_member_1")
+            fail("Expected IllegalArgumentException for short homeId")
+        } catch (_: IllegalArgumentException) {
+            // expected
+        }
+        try {
+            RtdbPayloadBuilder.buildRemoveMembershipUpdates("home_A001", "bad/uid")
+            fail("Expected IllegalArgumentException for forbidden uid")
+        } catch (_: IllegalArgumentException) {
+            // expected
+        }
+    }
 }

@@ -6,6 +6,11 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.smarthomeai.cloud.CloudComponents
+import com.example.smarthomeai.cloud.CloudFoundationFactory
+import com.example.smarthomeai.cloud.CloudHomeManager
+import com.example.smarthomeai.cloud.CloudUiBridgeRegistry
+import com.example.smarthomeai.cloud.CloudUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -15,7 +20,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
-class SmartHomeViewModel(app: Application) : AndroidViewModel(app) {
+class SmartHomeViewModel internal constructor(
+    app: Application,
+    cloudComponents: CloudComponents
+) : AndroidViewModel(app) {
+    constructor(app: Application) : this(app, CloudFoundationFactory.create(app))
+
     private val storage = Storage(app)
     private val notifier = Notifier(app)
     private val auth = AuthRepository(app)
@@ -25,6 +35,8 @@ class SmartHomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _loggedIn = MutableStateFlow(auth.isSignedIn())
     val loggedIn = _loggedIn.asStateFlow()
     val firebaseConfigured get() = auth.configured
+    private val cloudManager = CloudHomeManager(viewModelScope, cloudComponents.session, cloudComponents.repository)
+    val cloudState: StateFlow<CloudUiState> = cloudManager.state
     private var lastSample = 0L
     private var lastMotionAlert = 0L
     private var lastProximityAlert = 0L
@@ -34,6 +46,7 @@ class SmartHomeViewModel(app: Application) : AndroidViewModel(app) {
     private val faceAccess = com.example.smarthomeai.face.FaceAccessSession()
 
     init {
+        CloudUiBridgeRegistry.register(cloudManager)
         viewModelScope.launch(Dispatchers.IO) { val saved = storage.samples(); _state.update { it.copy(samples = (saved + it.samples).distinctBy { p -> p.timestamp }.sortedBy { p -> p.timestamp }) } }
         viewModelScope.launch(Dispatchers.IO) {
             _state.collectLatest { delay(500); storage.save(it) }
@@ -71,7 +84,20 @@ class SmartHomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun finishLogin(email: String) {
         _state.update { it.copy(userEmail = email) }; _loggedIn.value = true; refresh()
     }
-    fun logout() { verifyLiveFace(null);auth.signOut(); _loggedIn.value = false; _state.update { it.copy(userEmail = null, esp32Online = false, commands = emptyMap(),faceDoorMessage=null) } }
+    fun logout() { verifyLiveFace(null); cloudManager.onSignedOut(); auth.signOut(); _loggedIn.value = false; _state.update { it.copy(userEmail = null, esp32Online = false, commands = emptyMap(),faceDoorMessage=null) } }
+
+    fun selectCloudHome(homeId: String) = cloudManager.selectHome(homeId)
+    fun createCloudHome(name: String) = cloudManager.createHome(name)
+    fun leaveSelectedCloudHome() = cloudManager.leaveSelectedHome()
+    fun removeCloudMember(memberUid: String) = cloudManager.removeMember(memberUid)
+    fun retryCloud() = cloudManager.retry()
+    fun dismissCloudFeedback() = cloudManager.dismissFeedback()
+
+    override fun onCleared() {
+        CloudUiBridgeRegistry.unregister(cloudManager)
+        cloudManager.clear()
+        super.onCleared()
+    }
 
     fun refresh() { viewModelScope.launch(Dispatchers.IO) { network.withLock { if(_loggedIn.value) refreshLocked() } } }
     private fun refreshLocked(): SensorData? {

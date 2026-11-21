@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.smarthomeai.cloud.CloudUiBridge
 import com.example.smarthomeai.data.*
 import com.example.smarthomeai.ui.components.*
 import com.example.smarthomeai.ui.theme.*
@@ -19,7 +20,8 @@ import com.example.smarthomeai.ui.theme.*
 @Composable
 fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit,
                onMode: (HomeMode) -> Unit, onRefresh: () -> Unit, onNavigate: (String) -> Unit,
-               onClothesline: (Boolean) -> Unit = {}, onRainRetraction: (Boolean) -> Unit = {}) {
+               onClothesline: (Boolean) -> Unit = {}, onRainRetraction: (Boolean) -> Unit = {},
+               cloudBridge: CloudUiBridge? = rememberActiveCloudBridge()) {
     AppPage("Nhà của tôi", "", "home", onNavigate, unreadAlerts = state.alerts.count { !it.reviewed }) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -28,6 +30,11 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
                     if (state.esp32Online) Blue50 else YellowSoft)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onRefresh) { Text("Làm mới") }
+            }
+        }
+        if (cloudBridge != null) {
+            item {
+                CloudHomeBannerFromBridge(cloudBridge) { onNavigate("settings") }
             }
         }
         item { SecurityCard(state, onMode) }

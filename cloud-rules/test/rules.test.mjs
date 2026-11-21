@@ -565,6 +565,16 @@ describe('Group 3: Homes, Members & Live Listener Revocation (#11-#22)', () => {
     await assertFails(db.ref('userHomes/uA/home_A001').remove());
   });
 
+  it('#18b [B3] Owner uA cannot self-leave via multi-path atomic delete', async () => {
+    const db = dbFor('uA');
+    await assertFails(
+      db.ref('/').update({
+        'homes/home_A001/members/uA': null,
+        'userHomes/uA/home_A001': null
+      })
+    );
+  });
+
   it('#19 [ROW-05] uB self-leaves via multi-path atomic delete of members/uB and userHomes/uB/home_A001', async () => {
     const db = dbFor('uB');
     await assertSucceeds(
@@ -665,12 +675,87 @@ describe('Group 3: Homes, Members & Live Listener Revocation (#11-#22)', () => {
     );
   });
 
+  it('#20c [B3] Live listener on homes/home_A001/members receives PERMISSION_DENIED after uB membership is revoked', async () => {
+    const dbB = dbFor('uB');
+    const membersRefB = dbB.ref('homes/home_A001/members');
+
+    const revokedError = await new Promise((resolve, reject) => {
+      let gotFirst = false;
+      const timer = setTimeout(() => {
+        membersRefB.off('value');
+        reject(new Error('Timed out waiting for live members listener PERMISSION_DENIED'));
+      }, 5000);
+
+      membersRefB.on(
+        'value',
+        async (snap) => {
+          if (!gotFirst && snap.exists()) {
+            gotFirst = true;
+            try {
+              await dbFor('uA').ref('/').update({
+                'homes/home_A001/members/uB': null,
+                'userHomes/uB/home_A001': null
+              });
+            } catch (e) {
+              clearTimeout(timer);
+              reject(e);
+            }
+          }
+        },
+        (err) => {
+          clearTimeout(timer);
+          resolve(err);
+        }
+      );
+    });
+
+    membersRefB.off('value');
+    assert.ok(revokedError, 'Expected live members listener cancel callback to fire');
+    assert.match(
+      String(revokedError.code || revokedError.message),
+      /PERMISSION_DENIED|permission_denied/i
+    );
+  });
+
   it('#21 Deleting only members/uB leaves userHomes readable but blocks homes/home_A001/meta', async () => {
     await assertSucceeds(dbFor('uA').ref('homes/home_A001/members/uB').remove());
     const dbB = dbFor('uB');
     const uhSnap = await assertSucceeds(dbB.ref('userHomes/uB').once('value'));
     assert.equal(uhSnap.val().home_A001, 'member');
     await assertFails(dbB.ref('homes/home_A001/meta').once('value'));
+  });
+
+  it('#21b [B3] When uB has two homes and home_A001 membership is revoked, valid home_B002/meta remains readable while home_A001/meta returns PERMISSION_DENIED', async () => {
+    const dbB = dbFor('uB');
+    // uB creates their own second home home_B002
+    await assertSucceeds(
+      dbB.ref('homes/home_B002/meta').set({
+        name: 'Nha Rieng B',
+        ownerUid: 'uB',
+        createdAt: SERVER_TS,
+        schemaVersion: 1
+      })
+    );
+    await assertSucceeds(
+      dbB.ref('homes/home_B002/members/uB').set({
+        role: 'owner',
+        addedAt: SERVER_TS,
+        addedBy: 'uB'
+      })
+    );
+    await assertSucceeds(dbB.ref('userHomes/uB/home_B002').set('owner'));
+
+    // Owner uA revokes only members/uB on home_A001 (simulating stale userHomes entry)
+    await assertSucceeds(dbFor('uA').ref('homes/home_A001/members/uB').remove());
+
+    // uB still sees both in userHomes/uB, fails PERMISSION_DENIED on home_A001/meta,
+    // and succeeds reading valid home_B002/meta.
+    const indexSnap = await assertSucceeds(dbB.ref('userHomes/uB').once('value'));
+    assert.equal(indexSnap.val().home_A001, 'member');
+    assert.equal(indexSnap.val().home_B002, 'owner');
+    await assertFails(dbB.ref('homes/home_A001/meta').once('value'));
+    const validMeta = await assertSucceeds(dbB.ref('homes/home_B002/meta').once('value'));
+    assert.equal(validMeta.val().name, 'Nha Rieng B');
   });
 
   it('#22 Member uB cannot delete another member uB2', async () => {
@@ -682,6 +767,27 @@ describe('Group 3: Homes, Members & Live Listener Revocation (#11-#22)', () => {
       })
     );
     await assertFails(dbFor('uB').ref('homes/home_A001/members/uB2').remove());
+  });
+
+  it('#22b [B3] Member uB cannot remove another member uB2 via multi-path atomic delete and cannot escalate userHomes role to owner', async () => {
+    const dbA = dbFor('uA');
+    await assertSucceeds(
+      dbA.ref('homes/home_A001/members/uB2').set({
+        role: 'member',
+        addedAt: SERVER_TS,
+        addedBy: 'uA'
+      })
+    );
+    await assertSucceeds(dbA.ref('userHomes/uB2/home_A001').set('member'));
+
+    const dbB = dbFor('uB');
+    await assertFails(
+      dbB.ref('/').update({
+        'homes/home_A001/members/uB2': null,
+        'userHomes/uB2/home_A001': null
+      })
+    );
+    await assertFails(dbB.ref('userHomes/uB/home_A001').set('owner'));
   });
 });
 
