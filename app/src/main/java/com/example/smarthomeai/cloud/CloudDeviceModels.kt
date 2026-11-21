@@ -118,3 +118,73 @@ enum class CreateOnlyWriteOutcome {
     WRITTEN,
     ALREADY_EXISTS
 }
+
+enum class DataSource {
+    LAN,
+    CLOUD,
+    LOCAL_CACHE,
+    NONE
+}
+
+data class GatewayStateSnapshot(
+    val online: Boolean,
+    val reportedBy: String? = null,
+    val receivedAt: Long,
+    val deviceTs: Long? = null,
+    val temp: Int? = null,
+    val hum: Int? = null,
+    val motion: Boolean? = null,
+    val light: Boolean? = null,
+    val door: Boolean? = null,
+    val alarm: Boolean? = null,
+    val monitoring: Boolean? = null,
+    val mode: HomeMode? = null
+)
+
+data class CloudTelemetrySnapshot(
+    val recordId: String,
+    val temp: Int? = null,
+    val hum: Int? = null,
+    val receivedAt: Long,
+    val deviceTs: Long? = null
+)
+
+data class CloudEventRecord(
+    val id: String,
+    val type: String,
+    val severity: String,
+    val stream: String,
+    val seq: Long,
+    val receivedAt: Long,
+    val deviceTs: Long? = null,
+    val detail: String? = null
+)
+
+data class CloudDeviceSnapshot(
+    val deviceId: String,
+    val gatewayState: GatewayStateSnapshot? = null,
+    val latestTelemetry: CloudTelemetrySnapshot? = null,
+    val recentEvents: List<CloudEventRecord> = emptyList(),
+    val loading: Boolean = false,
+    val error: CloudError? = null,
+    val errorMessage: String? = null
+) {
+    val bestReceivedAt: Long?
+        get() = maxOf(
+            gatewayState?.receivedAt ?: 0L,
+            latestTelemetry?.receivedAt ?: 0L,
+            recentEvents.maxOfOrNull { it.receivedAt } ?: 0L
+        ).takeIf { it > 0L }
+
+    val bestDeviceTs: Long?
+        get() = gatewayState?.deviceTs?.takeIf { it > 0L }
+            ?: latestTelemetry?.deviceTs?.takeIf { it > 0L }
+}
+
+data class ResolvedDataSource(
+    val source: DataSource,
+    val updatedAt: Long? = null,
+    val deviceTs: Long? = null,
+    val isStale: Boolean,
+    val gatewayOnline: Boolean? = null
+)

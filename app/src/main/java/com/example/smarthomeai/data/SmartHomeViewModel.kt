@@ -7,13 +7,17 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.smarthomeai.cloud.CloudComponents
+import com.example.smarthomeai.cloud.CloudDeviceSnapshot
+import com.example.smarthomeai.cloud.CloudDeviceUiBridge
 import com.example.smarthomeai.cloud.CloudDeviceUiBridgeRegistry
+import com.example.smarthomeai.cloud.CloudFallbackObserver
 import com.example.smarthomeai.cloud.CloudFoundationFactory
 import com.example.smarthomeai.cloud.CloudGatewaySync
 import com.example.smarthomeai.cloud.CloudHomeManager
 import com.example.smarthomeai.cloud.CloudSessionSyncEvaluator
 import com.example.smarthomeai.cloud.CloudUiBridgeRegistry
 import com.example.smarthomeai.cloud.CloudUiState
+import com.example.smarthomeai.cloud.GatewaySyncUiState
 import com.example.smarthomeai.cloud.toGatewayInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -54,6 +58,38 @@ class SmartHomeViewModel internal constructor(
             workContext = Dispatchers.IO
         )
     }
+    private val esp32OnlineFlow = _state
+        .map { it.esp32Online }
+        .distinctUntilChanged()
+    private val cloudFallbackObserver: CloudFallbackObserver? = cloudComponents.deviceRepository?.let { deviceRepo ->
+        CloudFallbackObserver(
+            scope = viewModelScope,
+            cloudStateFlow = cloudManager.state,
+            esp32OnlineFlow = esp32OnlineFlow,
+            deviceRepository = deviceRepo,
+            workContext = Dispatchers.IO
+        )
+    }
+    private val deviceUiBridge: CloudDeviceUiBridge? = if (gatewaySync != null || cloudFallbackObserver != null) {
+        object : CloudDeviceUiBridge {
+            override val gatewaySync: StateFlow<GatewaySyncUiState> =
+                this@SmartHomeViewModel.gatewaySync?.gatewaySync
+                    ?: MutableStateFlow(GatewaySyncUiState()).asStateFlow()
+
+            override val cloudSnapshot: StateFlow<CloudDeviceSnapshot?> =
+                cloudFallbackObserver?.cloudSnapshot
+                    ?: MutableStateFlow<CloudDeviceSnapshot?>(null).asStateFlow()
+
+            override fun retrySync() {
+                this@SmartHomeViewModel.gatewaySync?.retrySync()
+                cloudFallbackObserver?.retry()
+            }
+        }
+    } else {
+        null
+    }
+    val cloudSnapshot: StateFlow<CloudDeviceSnapshot?> =
+        deviceUiBridge?.cloudSnapshot ?: MutableStateFlow<CloudDeviceSnapshot?>(null).asStateFlow()
     private val _reauthRequired = MutableStateFlow(false)
     val reauthRequired: StateFlow<Boolean> = _reauthRequired.asStateFlow()
     private var observedCloudUid: String? = null
@@ -67,7 +103,7 @@ class SmartHomeViewModel internal constructor(
 
     init {
         CloudUiBridgeRegistry.register(cloudManager)
-        gatewaySync?.let { CloudDeviceUiBridgeRegistry.register(it) }
+        deviceUiBridge?.let { CloudDeviceUiBridgeRegistry.register(it) }
         viewModelScope.launch {
             combine(
                 _loggedIn,
@@ -142,10 +178,9 @@ class SmartHomeViewModel internal constructor(
     fun dismissCloudFeedback() = cloudManager.dismissFeedback()
 
     override fun onCleared() {
-        gatewaySync?.let {
-            CloudDeviceUiBridgeRegistry.unregister(it)
-            it.clear()
-        }
+        deviceUiBridge?.let { CloudDeviceUiBridgeRegistry.unregister(it) }
+        cloudFallbackObserver?.clear()
+        gatewaySync?.clear()
         CloudUiBridgeRegistry.unregister(cloudManager)
         cloudManager.clear()
         super.onCleared()

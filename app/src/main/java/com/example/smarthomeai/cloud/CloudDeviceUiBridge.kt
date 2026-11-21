@@ -2,7 +2,9 @@ package com.example.smarthomeai.cloud
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.lang.ref.WeakReference
 
 enum class GatewaySyncPhase {
@@ -25,12 +27,17 @@ data class GatewaySyncUiState(
     val errorMessage: String? = null
 )
 
+private val EMPTY_CLOUD_SNAPSHOT_FLOW: StateFlow<CloudDeviceSnapshot?> =
+    MutableStateFlow<CloudDeviceSnapshot?>(null).asStateFlow()
+
 /**
- * UI-facing bridge exposing Gateway-to-Cloud sync state and manual retry action
- * without leaking ViewModel, network Mutex, or Firebase SDK types.
+ * UI-facing bridge exposing Gateway-to-Cloud sync state, Cloud fallback snapshot,
+ * and manual retry action without leaking ViewModel, network Mutex, or Firebase SDK types.
  */
 interface CloudDeviceUiBridge {
     val gatewaySync: StateFlow<GatewaySyncUiState>
+    val cloudSnapshot: StateFlow<CloudDeviceSnapshot?>
+        get() = EMPTY_CLOUD_SNAPSHOT_FLOW
     fun retrySync() = Unit
 }
 

@@ -1,7 +1,9 @@
 package com.example.smarthomeai.cloud
 
+import kotlinx.coroutines.flow.Flow
+
 /**
- * Pure Kotlin repository contract for Gateway device registration and RTDB deviceData sync (F2a).
+ * Pure Kotlin repository contract for Gateway device registration and RTDB deviceData sync (F2a + F3).
  * Must not import any Firebase SDK types.
  */
 interface CloudDeviceRepository {
@@ -9,6 +11,30 @@ interface CloudDeviceRepository {
         expectedUid: String,
         homeId: String
     ): CloudResult<DeviceResolveResult>
+
+    suspend fun findActiveDevice(
+        expectedUid: String,
+        homeId: String
+    ): CloudResult<CloudDevice?>
+
+    fun observeGatewayState(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String
+    ): Flow<CloudResult<GatewayStateSnapshot?>>
+
+    fun observeLatestTelemetry(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String
+    ): Flow<CloudResult<CloudTelemetrySnapshot?>>
+
+    fun observeRecentEvents(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String,
+        limit: Int = 20
+    ): Flow<CloudResult<List<CloudEventRecord>>>
 
     suspend fun publishGatewayState(
         expectedUid: String,

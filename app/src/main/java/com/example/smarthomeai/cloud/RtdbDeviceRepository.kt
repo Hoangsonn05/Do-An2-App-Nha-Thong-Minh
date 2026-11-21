@@ -1,5 +1,6 @@
 package com.example.smarthomeai.cloud
 
+import com.example.smarthomeai.data.HomeMode
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseException
@@ -9,6 +10,9 @@ import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
@@ -59,17 +63,7 @@ class RtdbDeviceRepository(
 
         val snapshot = (readResult as SnapshotReadResult.Found).snapshot
         if (snapshot.exists() && snapshot.hasChildren()) {
-            val devices = snapshot.children.mapNotNull { child ->
-                parseDeviceEntry(
-                    id = child.key,
-                    rawName = child.child("name").value,
-                    rawModel = child.child("model").value,
-                    rawStatus = child.child("status").value,
-                    rawCreatedAt = child.child("createdAt").value,
-                    rawCreatedBy = child.child("createdBy").value
-                )
-            }
-            val evaluated = evaluateDevicesSnapshot(devices)
+            val evaluated = parseDevicesSnapshot(snapshot)
                 ?: return CloudResult.Err(
                     CloudError.InvalidData,
                     "Malformed device entries under homes/$homeId/devices."
@@ -108,6 +102,168 @@ class RtdbDeviceRepository(
             createdBy = ctx.uid
         )
         return CloudResult.Ok(DeviceResolveResult.Active(createdDevice, hasMultipleActive = false))
+    }
+
+    override suspend fun findActiveDevice(
+        expectedUid: String,
+        homeId: String
+    ): CloudResult<CloudDevice?> {
+        val ctx = when (val auth = requireAuthorizedContext(expectedUid)) {
+            is CloudResult.Ok -> auth.data
+            is CloudResult.Err -> return auth
+            CloudResult.Unavailable -> return CloudResult.Unavailable
+        }
+        if (!RtdbPaths.isValidEntityId(homeId)) {
+            return CloudResult.Err(CloudError.InvalidData, "Invalid homeId: $homeId")
+        }
+
+        val devicesRef = ctx.db.getReference(RtdbPaths.homeDevicesPath(homeId))
+        val readResult = readSingleSnapshot(devicesRef)
+        if (readResult is SnapshotReadResult.Error) {
+            return CloudResult.Err(readResult.error, readResult.message)
+        }
+        ensureSameUid(expectedUid)?.let { return it }
+
+        val snapshot = (readResult as SnapshotReadResult.Found).snapshot
+        if (!snapshot.exists() || !snapshot.hasChildren()) {
+            return CloudResult.Ok(null)
+        }
+        val evaluated = parseDevicesSnapshot(snapshot)
+            ?: return CloudResult.Err(
+                CloudError.InvalidData,
+                "Malformed device entries under homes/$homeId/devices."
+            )
+        return when (evaluated) {
+            is DeviceResolveResult.Active -> CloudResult.Ok(evaluated.device)
+            is DeviceResolveResult.MultipleActiveWarning -> CloudResult.Ok(evaluated.primaryDevice)
+            is DeviceResolveResult.RevokedOnly -> CloudResult.Ok(null)
+        }
+    }
+
+    override fun observeGatewayState(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String
+    ): Flow<CloudResult<GatewayStateSnapshot?>> = observeDeviceQuery(
+        expectedUid = expectedUid,
+        homeId = homeId,
+        deviceId = deviceId,
+        queryProvider = { db ->
+            db.getReference(RtdbPaths.deviceGatewayStatePath(homeId, deviceId))
+        }
+    ) { snapshot ->
+        if (!snapshot.exists()) {
+            CloudResult.Ok(null)
+        } else {
+            val valuesNode = snapshot.child("values")
+            val parsed = parseGatewayStateValues(
+                rawOnline = snapshot.child("online").value,
+                rawReportedBy = snapshot.child("reportedBy").value,
+                rawReceivedAt = snapshot.child("receivedAt").value,
+                rawDeviceTs = snapshot.child("deviceTs").value,
+                rawTemp = valuesNode.child("temp").value,
+                rawHum = valuesNode.child("hum").value,
+                rawMotion = valuesNode.child("motion").value,
+                rawLight = valuesNode.child("light").value,
+                rawDoor = valuesNode.child("door").value,
+                rawAlarm = valuesNode.child("alarm").value,
+                rawMonitoring = valuesNode.child("monitoring").value,
+                rawMode = valuesNode.child("mode").value
+            )
+            if (parsed != null) {
+                CloudResult.Ok(parsed)
+            } else {
+                CloudResult.Err(
+                    CloudError.InvalidData,
+                    "Malformed gateway state snapshot for $deviceId."
+                )
+            }
+        }
+    }
+
+    override fun observeLatestTelemetry(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String
+    ): Flow<CloudResult<CloudTelemetrySnapshot?>> = observeDeviceQuery(
+        expectedUid = expectedUid,
+        homeId = homeId,
+        deviceId = deviceId,
+        queryProvider = { db ->
+            db.getReference(RtdbPaths.deviceTelemetryPath(homeId, deviceId))
+                .orderByKey()
+                .limitToLast(1)
+        }
+    ) { snapshot ->
+        if (!snapshot.exists() || !snapshot.hasChildren()) {
+            CloudResult.Ok(null)
+        } else {
+            val latestChild = snapshot.children.lastOrNull()
+            if (latestChild == null) {
+                CloudResult.Ok(null)
+            } else {
+                val valuesNode = latestChild.child("values")
+                val parsed = parseTelemetryValues(
+                    recordId = latestChild.key,
+                    rawTemp = valuesNode.child("temp").value,
+                    rawHum = valuesNode.child("hum").value,
+                    rawReceivedAt = latestChild.child("receivedAt").value,
+                    rawDeviceTs = latestChild.child("deviceTs").value
+                )
+                if (parsed != null) {
+                    CloudResult.Ok(parsed)
+                } else {
+                    CloudResult.Err(
+                        CloudError.InvalidData,
+                        "Malformed telemetry snapshot for $deviceId."
+                    )
+                }
+            }
+        }
+    }
+
+    override fun observeRecentEvents(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String,
+        limit: Int
+    ): Flow<CloudResult<List<CloudEventRecord>>> {
+        val boundedLimit = limit.coerceIn(1, MAX_OBSERVE_EVENTS_LIMIT)
+        return observeDeviceQuery(
+            expectedUid = expectedUid,
+            homeId = homeId,
+            deviceId = deviceId,
+            queryProvider = { db ->
+                db.getReference(RtdbPaths.deviceEventsPath(homeId, deviceId))
+                    .orderByChild("receivedAt")
+                    .limitToLast(boundedLimit)
+            }
+        ) { snapshot ->
+            if (!snapshot.exists() || !snapshot.hasChildren()) {
+                CloudResult.Ok(emptyList())
+            } else {
+                val parsed = snapshot.children.mapNotNull { child ->
+                    parseEventValues(
+                        id = child.key,
+                        rawType = child.child("type").value,
+                        rawSeverity = child.child("severity").value,
+                        rawStream = child.child("stream").value,
+                        rawSeq = child.child("seq").value,
+                        rawReceivedAt = child.child("receivedAt").value,
+                        rawDeviceTs = child.child("deviceTs").value,
+                        rawDetail = child.child("detail").value
+                    )
+                }
+                if (parsed.isEmpty()) {
+                    CloudResult.Err(
+                        CloudError.InvalidData,
+                        "Malformed event entries for $deviceId."
+                    )
+                } else {
+                    CloudResult.Ok(sortRecentEventsDescending(parsed, boundedLimit))
+                }
+            }
+        }
     }
 
     override suspend fun publishGatewayState(
@@ -437,6 +593,92 @@ class RtdbDeviceRepository(
         return copy
     }
 
+    private fun parseDevicesSnapshot(snapshot: DataSnapshot): DeviceResolveResult? {
+        val devices = snapshot.children.mapNotNull { child ->
+            parseDeviceEntry(
+                id = child.key,
+                rawName = child.child("name").value,
+                rawModel = child.child("model").value,
+                rawStatus = child.child("status").value,
+                rawCreatedAt = child.child("createdAt").value,
+                rawCreatedBy = child.child("createdBy").value
+            )
+        }
+        return evaluateDevicesSnapshot(devices)
+    }
+
+    private fun <T> observeDeviceQuery(
+        expectedUid: String,
+        homeId: String,
+        deviceId: String,
+        queryProvider: (FirebaseDatabase) -> Query,
+        parser: (DataSnapshot) -> CloudResult<T>
+    ): Flow<CloudResult<T>> = callbackFlow {
+        val ctx = when (val auth = requireAuthorizedContext(expectedUid)) {
+            is CloudResult.Ok -> auth.data
+            is CloudResult.Err -> {
+                trySend(auth)
+                close()
+                return@callbackFlow
+            }
+            CloudResult.Unavailable -> {
+                trySend(CloudResult.Unavailable)
+                close()
+                return@callbackFlow
+            }
+        }
+        if (!RtdbPaths.isValidEntityId(homeId) || !RtdbPaths.isValidEntityId(deviceId)) {
+            trySend(CloudResult.Err(CloudError.InvalidData, "Invalid homeId or deviceId."))
+            close()
+            return@callbackFlow
+        }
+
+        val query = queryProvider(ctx.db)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (provider.uid != expectedUid) {
+                    trySend(
+                        CloudResult.Err(
+                            CloudError.Unauthenticated,
+                            "Auth UID changed while observing cloud device data."
+                        )
+                    )
+                    close()
+                    return
+                }
+                val result = try {
+                    parser(snapshot)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    val mapped = if (t is DatabaseException) {
+                        CloudError.InvalidData
+                    } else {
+                        CloudErrorMapper.mapException(t)
+                    }
+                    CloudResult.Err(mapped, t.message)
+                }
+                trySend(result)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                val result = if (provider.uid != expectedUid) {
+                    CloudResult.Err(
+                        CloudError.Unauthenticated,
+                        "Auth UID changed while observing cloud device data."
+                    )
+                } else {
+                    CloudResult.Err(CloudErrorMapper.mapDatabaseError(error), error.message)
+                }
+                trySend(result)
+                close()
+            }
+        }
+
+        query.addValueEventListener(listener)
+        awaitClose { query.removeEventListener(listener) }
+    }
+
     private fun containsForbiddenSecretKey(map: Map<*, *>): Boolean {
         for ((k, v) in map) {
             val keyStr = k as? String ?: continue
@@ -452,6 +694,7 @@ class RtdbDeviceRepository(
 
     companion object {
         private const val MAX_CURSOR_LIMIT: Int = 500
+        private const val MAX_OBSERVE_EVENTS_LIMIT: Int = 100
         // Guard constant to reject any accidental map key carrying LAN secret material.
         private const val FORBIDDEN_SECRET_KEY: String = "deviceKey"
 
@@ -564,5 +807,116 @@ class RtdbDeviceRepository(
             if (!RtdbPaths.isValidEventSeq(seq)) return null
             return stream to seq
         }
+
+        internal fun parseGatewayStateValues(
+            rawOnline: Any?,
+            rawReportedBy: Any?,
+            rawReceivedAt: Any?,
+            rawDeviceTs: Any?,
+            rawTemp: Any?,
+            rawHum: Any?,
+            rawMotion: Any?,
+            rawLight: Any?,
+            rawDoor: Any?,
+            rawAlarm: Any?,
+            rawMonitoring: Any?,
+            rawMode: Any?
+        ): GatewayStateSnapshot? {
+            val online = safeBoolean(rawOnline) ?: return null
+            val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
+            val reportedBy = safeString(rawReportedBy)
+            val deviceTs = safeLong(rawDeviceTs)?.takeIf { it > 0L }
+            val temp = safeInt(rawTemp)
+                ?.takeIf { it in (CloudMapper.MIN_TEMP_EXCLUSIVE + 1) until CloudMapper.MAX_TEMP_EXCLUSIVE }
+            val hum = safeInt(rawHum)
+                ?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE }
+            val motion = safeBoolean(rawMotion)
+            val light = safeBoolean(rawLight)
+            val door = safeBoolean(rawDoor)
+            val alarm = safeBoolean(rawAlarm)
+            val monitoring = safeBoolean(rawMonitoring)
+            val mode = safeString(rawMode)?.let { modeStr ->
+                runCatching { HomeMode.valueOf(modeStr) }.getOrNull()
+            }
+            return GatewayStateSnapshot(
+                online = online,
+                reportedBy = reportedBy,
+                receivedAt = receivedAt,
+                deviceTs = deviceTs,
+                temp = temp,
+                hum = hum,
+                motion = motion,
+                light = light,
+                door = door,
+                alarm = alarm,
+                monitoring = monitoring,
+                mode = mode
+            )
+        }
+
+        internal fun parseTelemetryValues(
+            recordId: String?,
+            rawTemp: Any?,
+            rawHum: Any?,
+            rawReceivedAt: Any?,
+            rawDeviceTs: Any?
+        ): CloudTelemetrySnapshot? {
+            if (recordId.isNullOrBlank() || RtdbPaths.containsForbiddenRtdbChars(recordId)) return null
+            val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
+            val temp = safeInt(rawTemp)
+                ?.takeIf { it in (CloudMapper.MIN_TEMP_EXCLUSIVE + 1) until CloudMapper.MAX_TEMP_EXCLUSIVE }
+            val hum = safeInt(rawHum)
+                ?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE }
+            if (temp == null && hum == null) return null
+            val deviceTs = safeLong(rawDeviceTs)?.takeIf { it > 0L }
+            return CloudTelemetrySnapshot(
+                recordId = recordId,
+                temp = temp,
+                hum = hum,
+                receivedAt = receivedAt,
+                deviceTs = deviceTs
+            )
+        }
+
+        internal fun parseEventValues(
+            id: String?,
+            rawType: Any?,
+            rawSeverity: Any?,
+            rawStream: Any?,
+            rawSeq: Any?,
+            rawReceivedAt: Any?,
+            rawDeviceTs: Any?,
+            rawDetail: Any?
+        ): CloudEventRecord? {
+            if (id.isNullOrBlank() || RtdbPaths.containsForbiddenRtdbChars(id)) return null
+            val type = safeString(rawType)?.takeIf { it.isNotBlank() } ?: return null
+            val severity = safeString(rawSeverity)?.takeIf { it.isNotBlank() } ?: return null
+            val stream = safeString(rawStream)?.takeIf { RtdbPaths.isValidCloudStream(it) } ?: return null
+            val seq = safeLong(rawSeq)?.takeIf { RtdbPaths.isValidEventSeq(it) } ?: return null
+            val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
+            val deviceTs = safeLong(rawDeviceTs)?.takeIf { it > 0L }
+            val detail = safeString(rawDetail)
+            return CloudEventRecord(
+                id = id,
+                type = type,
+                severity = severity,
+                stream = stream,
+                seq = seq,
+                receivedAt = receivedAt,
+                deviceTs = deviceTs,
+                detail = detail
+            )
+        }
+
+        internal fun sortRecentEventsDescending(
+            events: List<CloudEventRecord>,
+            limit: Int = MAX_OBSERVE_EVENTS_LIMIT
+        ): List<CloudEventRecord> = events
+            .sortedWith(
+                compareByDescending<CloudEventRecord> { it.receivedAt }
+                    .thenByDescending { it.seq }
+                    .thenByDescending { it.id }
+            )
+            .take(limit.coerceIn(1, MAX_OBSERVE_EVENTS_LIMIT))
     }
 }
