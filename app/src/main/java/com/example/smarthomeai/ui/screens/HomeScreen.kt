@@ -6,13 +6,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.smarthomeai.cloud.CloudDeviceUiBridge
 import com.example.smarthomeai.cloud.CloudUiBridge
+import com.example.smarthomeai.cloud.DataSource
+import com.example.smarthomeai.cloud.DataSourceResolver
+import com.example.smarthomeai.cloud.rememberActiveCloudDeviceBridge
 import com.example.smarthomeai.data.*
 import com.example.smarthomeai.ui.components.*
 import com.example.smarthomeai.ui.theme.*
@@ -21,45 +27,124 @@ import com.example.smarthomeai.ui.theme.*
 fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit,
                onMode: (HomeMode) -> Unit, onRefresh: () -> Unit, onNavigate: (String) -> Unit,
                onClothesline: (Boolean) -> Unit = {}, onRainRetraction: (Boolean) -> Unit = {},
-               cloudBridge: CloudUiBridge? = rememberActiveCloudBridge()) {
+               cloudBridge: CloudUiBridge? = rememberActiveCloudBridge(),
+               deviceBridge: CloudDeviceUiBridge? = rememberActiveCloudDeviceBridge()) {
+    val cloudSnapshot = if (deviceBridge != null) {
+        deviceBridge.cloudSnapshot.collectAsState().value
+    } else {
+        null
+    }
+    val resolvedSource = remember(state.esp32Online, state.lastSeen, cloudSnapshot) {
+        DataSourceResolver.resolve(
+            esp32Online = state.esp32Online,
+            localLastSeen = state.lastSeen,
+            snapshot = cloudSnapshot
+        )
+    }
+    val cloudFallbackSnapshot = cloudSnapshot?.takeIf { resolvedSource.source == DataSource.CLOUD }
+
     AppPage("Nhà của tôi", "", "home", onNavigate, unreadAlerts = state.alerts.count { !it.reviewed }) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                StatusPill(if (state.esp32Online) "ESP32 đã kết nối" else "ESP32 mất kết nối",
-                    if (state.esp32Online) Blue600 else OrangeWarn,
-                    if (state.esp32Online) Blue50 else YellowSoft)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onRefresh) { Text("Làm mới") }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    StatusPill(if (state.esp32Online) "ESP32 đã kết nối" else "ESP32 mất kết nối",
+                        if (state.esp32Online) Blue600 else OrangeWarn,
+                        if (state.esp32Online) Blue50 else YellowSoft)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onRefresh) { Text("Làm mới") }
+                }
+                DataSourceStatusRow(
+                    resolved = resolvedSource,
+                    fallbackLoading = cloudSnapshot?.loading == true,
+                    fallbackErrorMessage = cloudSnapshot?.errorMessage
+                )
             }
         }
         if (cloudBridge != null) {
             item {
-                CloudHomeBannerFromBridge(cloudBridge, onReauth = { onNavigate("login") }) { onNavigate("settings") }
+                CloudHomeBannerFromBridge(
+                    bridge = cloudBridge,
+                    onReauth = { onNavigate("login") },
+                    onOpenManagement = { onNavigate("settings") },
+                    deviceBridge = deviceBridge
+                )
             }
         }
         item { SecurityCard(state, onMode) }
         item { DoorControlCard(state, onSetDevice) { onNavigate("camera") } }
         item {
             WhiteCard(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Reading("Nhiệt độ", state.temperature?.let { "$it°C" } ?: "—", Modifier.weight(1f))
-                    Reading("Độ ẩm", state.humidity?.let { "$it%" } ?: "—", Modifier.weight(1f))
+                if (cloudFallbackSnapshot != null) {
+                    Text(
+                        text = "Đang hiển thị dữ liệu Cloud · chỉ đọc",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (resolvedSource.isStale) OrangeWarn else GreenOk,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                 }
-                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Reading("Mưa", when (state.hardware?.raining) {
+                val tempText = if (cloudFallbackSnapshot != null) {
+                    cloudFallbackSnapshot.effectiveTemp()?.let { "$it°C" } ?: "—"
+                } else {
+                    state.temperature?.let { "$it°C" } ?: "—"
+                }
+                val humText = if (cloudFallbackSnapshot != null) {
+                    cloudFallbackSnapshot.effectiveHum()?.let { "$it%" } ?: "—"
+                } else {
+                    state.humidity?.let { "$it%" } ?: "—"
+                }
+                val rainText = if (cloudFallbackSnapshot != null) {
+                    "—"
+                } else {
+                    when (state.hardware?.raining) {
                         true -> "Đang mưa"; false -> "Không mưa"; null -> "—"
-                    }, Modifier.weight(1f))
-                    Reading("Chuyển động", when {
+                    }
+                }
+                val motionText = if (cloudFallbackSnapshot != null) {
+                    when (cloudFallbackSnapshot.gatewayState?.motion) {
+                        true -> "Phát hiện"
+                        false -> "Không có"
+                        null -> "Chưa có dữ liệu"
+                    }
+                } else {
+                    when {
                         state.lastSeen == 0L || (state.security?.warmup ?: 0) > 0 -> "Chưa có dữ liệu"
                         state.motionDetected -> "Phát hiện"
                         else -> "Không có"
-                    }, Modifier.weight(1f))
+                    }
                 }
-                if (!state.esp32Online && state.lastSeen > 0) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Reading("Nhiệt độ", tempText, Modifier.weight(1f))
+                    Reading("Độ ẩm", humText, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Reading("Mưa", rainText, Modifier.weight(1f))
+                    Reading("Chuyển động", motionText, Modifier.weight(1f))
+                }
+                if (cloudFallbackSnapshot != null) {
+                    val gatewayStatusText = when (cloudFallbackSnapshot.gatewayState?.online) {
+                        true -> "online"
+                        false -> "offline"
+                        null -> "chưa rõ"
+                    }
+                    Text(
+                        text = "Cập nhật Cloud lúc ${resolvedSource.updatedAt?.let(::timeOnly) ?: "—"} · Gateway $gatewayStatusText",
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (resolvedSource.isStale) OrangeWarn else TextGray
+                    )
+                } else if (!state.esp32Online && state.lastSeen > 0) {
                     Text("Cập nhật lần cuối lúc ${timeOnly(state.lastSeen)}",
                         Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = TextGray)
                 }
                 TextButton(onClick = { onNavigate("env") }) { Text("Xem tất cả cảm biến") }
+            }
+        }
+        if (cloudFallbackSnapshot != null) {
+            item {
+                CloudReadOnlySummaryCard(
+                    snapshot = cloudFallbackSnapshot,
+                    resolved = resolvedSource
+                )
             }
         }
         item {

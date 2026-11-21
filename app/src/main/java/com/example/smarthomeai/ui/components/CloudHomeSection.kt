@@ -29,9 +29,15 @@ fun CloudHomeBannerFromBridge(
     bridge: CloudUiBridge,
     singleHomeMode: Boolean = true,
     onReauth: (() -> Unit)? = null,
-    onOpenManagement: () -> Unit = {}
+    onOpenManagement: () -> Unit = {},
+    deviceBridge: CloudDeviceUiBridge? = null
 ) {
     val cloudState by bridge.state.collectAsState()
+    val gatewaySyncState = if (deviceBridge != null) {
+        deviceBridge.gatewaySync.collectAsState().value
+    } else {
+        null
+    }
     CloudHomeBannerCard(
         cloudState = cloudState,
         onSelectHome = bridge::selectHome,
@@ -40,7 +46,9 @@ fun CloudHomeBannerFromBridge(
         onDismissFeedback = bridge::dismissFeedback,
         onOpenManagement = onOpenManagement,
         singleHomeMode = singleHomeMode,
-        onReauth = onReauth
+        onReauth = onReauth,
+        gatewaySyncState = gatewaySyncState,
+        onRetryGatewaySync = deviceBridge?.let { { it.retrySync() } }
     )
 }
 
@@ -75,7 +83,9 @@ fun CloudHomeBannerCard(
     onDismissFeedback: () -> Unit = {},
     onOpenManagement: () -> Unit = {},
     singleHomeMode: Boolean = false,
-    onReauth: (() -> Unit)? = null
+    onReauth: (() -> Unit)? = null,
+    gatewaySyncState: GatewaySyncUiState? = null,
+    onRetryGatewaySync: (() -> Unit)? = null
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var showSwitchDialog by rememberSaveable { mutableStateOf(false) }
@@ -117,6 +127,14 @@ fun CloudHomeBannerCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = if (cloudState.status == CloudStatus.ACCESS_REVOKED || cloudState.status == CloudStatus.ERROR) RedAlert else TextGray,
                 modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        if (gatewaySyncState != null) {
+            GatewaySyncStatusSection(
+                gatewaySyncState = gatewaySyncState,
+                onRetrySync = onRetryGatewaySync,
+                retryButtonLabel = if (cloudState.status == CloudStatus.ERROR) "Thử lại đồng bộ" else "Thử lại"
             )
         }
 
