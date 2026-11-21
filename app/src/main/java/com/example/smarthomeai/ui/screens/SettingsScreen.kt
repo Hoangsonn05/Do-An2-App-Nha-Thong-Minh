@@ -65,6 +65,12 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
         item {
             SectionTitle("Thành viên", action = "Thêm") { onNavigate("register") }
             WhiteCard(Modifier.fillMaxWidth()) {
+                Text(
+                    "Khuôn mặt mở cửa cục bộ trên điện thoại (không đồng bộ lên Cloud).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextGray,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
                 if(state.registeredUsers.isEmpty()) Text("Chưa có thành viên đã đăng ký.", style = MaterialTheme.typography.bodyMedium, color = TextGray)
                 state.registeredUsers.forEach { name ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -113,7 +119,7 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
         confirmButton = { TextButton(onClick = { confirmLogout = false; onLogout() }) { Text("Đăng xuất") } },
         dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Hủy") } })
     if(showInfo) AlertDialog(onDismissRequest = { showInfo = false }, title = { Text("Smart Home · 3.6") },
-        text = { Text("Khuôn mặt được xử lý trên điện thoại. Dữ liệu thiết bị và nhật ký lưu chung trên máy, chưa phân quyền theo tài khoản.\n\nESP32 v3 tự bảo vệ và lưu 64 sự kiện gần nhất khi app đóng. App lưu 100 cảnh báo và 7 ngày số đo. Camera cần mở để nhận diện. Điều khiển và đồng bộ dùng chung LAN; chưa có thông báo cloud từ xa.") },
+        text = { Text("Nhận diện khuôn mặt xử lý trực tiếp trên điện thoại (on-device), không tải ảnh hay vector lên Cloud. Dữ liệu thiết bị và nhật ký cục bộ lưu chung trên máy (SharedPreferences/SQLite).\n\nĐiều khiển thiết bị (Đèn, Cửa, Còi, Giàn phơi, Chế độ bảo vệ) ưu tiên qua mạng Wi-Fi LAN trực tiếp tới ESP32. Khi đăng nhập Firebase và tạo nhà Cloud (1 nhà – 1 chủ sở hữu), ứng dụng đồng bộ trạng thái, cảm biến và sự kiện lên Firebase RTDB để xem dự phòng khi ra ngoài LAN (chỉ đọc; chưa hỗ trợ điều khiển từ xa hay thông báo đẩy Cloud).") },
         confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Đóng") } })
 }
 

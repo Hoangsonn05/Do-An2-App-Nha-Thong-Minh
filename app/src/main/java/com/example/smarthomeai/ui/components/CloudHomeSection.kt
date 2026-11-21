@@ -885,12 +885,16 @@ private fun statusLabel(state: CloudUiState, singleHomeMode: Boolean = false): S
 
 private fun statusDescription(state: CloudUiState, singleHomeMode: Boolean = false): String? = when (state.status) {
     CloudStatus.UNAVAILABLE -> "Ứng dụng chưa có cấu hình Cloud hợp lệ. Điều khiển ESP32 qua LAN vẫn hoạt động bình thường."
-    CloudStatus.SIGNED_OUT -> if (state.reauthRequired) {
-        "Phiên đăng nhập Cloud đã kết thúc. Điều khiển LAN vẫn hoạt động."
-    } else {
-        "Đăng nhập bằng tài khoản Firebase để đồng bộ danh sách nhà và thành viên."
+    CloudStatus.SIGNED_OUT -> when {
+        state.reauthRequired -> "Phiên đăng nhập Cloud đã kết thúc. Điều khiển LAN vẫn hoạt động."
+        singleHomeMode -> "Đăng nhập bằng tài khoản Firebase để đồng bộ nhà Cloud của bạn."
+        else -> "Đăng nhập bằng tài khoản Firebase để đồng bộ danh sách nhà và thành viên."
     }
-    CloudStatus.LOADING -> "Đang tải danh sách nhà cho tài khoản hiện tại…"
+    CloudStatus.LOADING -> if (singleHomeMode) {
+        "Đang tải thông tin nhà Cloud cho tài khoản hiện tại…"
+    } else {
+        "Đang tải danh sách nhà cho tài khoản hiện tại…"
+    }
     CloudStatus.EMPTY -> if (singleHomeMode && state.hasOnlyMemberHomes) {
         "Tài khoản đang chỉ tham gia nhà được chia sẻ; chế độ chia sẻ nhiều thành viên hiện tạm hoãn. Bạn có thể tạo nhà riêng cho ESP32 của mình."
     } else {

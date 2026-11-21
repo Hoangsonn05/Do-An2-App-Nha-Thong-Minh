@@ -20,15 +20,39 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.smarthomeai.cloud.CloudDeviceUiBridge
+import com.example.smarthomeai.cloud.CloudStatus
+import com.example.smarthomeai.cloud.CloudUiBridge
+import com.example.smarthomeai.cloud.CloudUiState
+import com.example.smarthomeai.cloud.GatewaySyncPhase
+import com.example.smarthomeai.cloud.GatewaySyncUiState
+import com.example.smarthomeai.cloud.rememberActiveCloudDeviceBridge
 import com.example.smarthomeai.data.*
 import com.example.smarthomeai.ui.components.*
 import com.example.smarthomeai.ui.theme.*
 
 @Composable
-fun SystemScreen(state: SmartHomeState, firebaseConfigured: Boolean, onRefresh: () -> Unit,
-                 onBack: () -> Unit, onNavigate: (String) -> Unit) {
+fun SystemScreen(
+    state: SmartHomeState,
+    firebaseConfigured: Boolean,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit,
+    onNavigate: (String) -> Unit,
+    cloudBridge: CloudUiBridge? = rememberActiveCloudBridge(),
+    deviceBridge: CloudDeviceUiBridge? = rememberActiveCloudDeviceBridge()
+) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
+    val cloudState = if (cloudBridge != null) {
+        cloudBridge.state.collectAsState().value
+    } else {
+        null
+    }
+    val gatewaySyncState = if (deviceBridge != null) {
+        deviceBridge.gatewaySync.collectAsState().value
+    } else {
+        null
+    }
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if(event == Lifecycle.Event.ON_RESUME) revision++ }
@@ -69,7 +93,9 @@ fun SystemScreen(state: SmartHomeState, firebaseConfigured: Boolean, onRefresh: 
                     DetailLine("Cảnh báo khoảng cách", "Vật trong vùng 2–10 cm")
                 }
                 DetailLine("Tài khoản", if(firebaseConfigured) "Firebase Authentication" else "Chế độ tài khoản demo")
-                Text("Ứng dụng → HTTP trong LAN → ESP32 → cảm biến và thiết bị. Nhận diện khuôn mặt chạy trên điện thoại.",
+                DetailLine("Nhà Cloud", systemCloudHomeStatusText(firebaseConfigured, cloudState))
+                DetailLine("Đồng bộ Gateway", systemGatewaySyncStatusText(gatewaySyncState))
+                Text("Điều khiển: Ứng dụng → HTTP LAN → ESP32. Dự phòng xem từ xa: Firebase RTDB (1 nhà). Khuôn mặt xử lý trên điện thoại.",
                     color = TextGray, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
             }
         }
@@ -97,5 +123,39 @@ private fun DetailLine(label: String, value: String) {
     Column(Modifier.padding(top = 12.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = TextGray)
         Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+internal fun systemCloudHomeStatusText(
+    firebaseConfigured: Boolean,
+    cloudState: CloudUiState?
+): String {
+    if (cloudState == null) {
+        return if (!firebaseConfigured) "Chế độ demo" else "Không có cầu nối Cloud"
+    }
+    return when (cloudState.status) {
+        CloudStatus.UNAVAILABLE -> if (!firebaseConfigured) "Chế độ demo" else "Cloud chưa khả dụng"
+        CloudStatus.SIGNED_OUT -> "Chưa đăng nhập"
+        CloudStatus.LOADING -> "Đang tải…"
+        CloudStatus.EMPTY -> "Chưa tạo nhà"
+        CloudStatus.READY -> (cloudState.selectedHome ?: cloudState.ownedHomes.firstOrNull())?.name ?: "Đã kết nối"
+        CloudStatus.ACCESS_REVOKED -> "Mất quyền truy cập nhà"
+        CloudStatus.ERROR -> cloudState.errorMessage?.takeIf { it.isNotBlank() } ?: "Lỗi kết nối Cloud"
+    }
+}
+
+internal fun systemGatewaySyncStatusText(
+    syncState: GatewaySyncUiState?
+): String {
+    if (syncState == null) return "Chưa kích hoạt"
+    return when (syncState.phase) {
+        GatewaySyncPhase.IDLE -> "Chưa kích hoạt"
+        GatewaySyncPhase.WAITING_HOME -> "Chờ chọn nhà Cloud"
+        GatewaySyncPhase.REGISTERING -> "Đang đăng ký thiết bị"
+        GatewaySyncPhase.SYNCING -> "Đang đồng bộ"
+        GatewaySyncPhase.OK -> syncState.lastSyncAt?.takeIf { it > 0L }?.let { "OK · ${timeOnly(it)}" } ?: "OK"
+        GatewaySyncPhase.PAUSED_LAN_OFFLINE -> "Tạm dừng khi mất LAN"
+        GatewaySyncPhase.BLOCKED -> "Bị thu hồi"
+        GatewaySyncPhase.ERROR -> syncState.errorMessage?.takeIf { it.isNotBlank() }?.let { "Lỗi · $it" } ?: "Lỗi"
     }
 }
