@@ -26,6 +26,7 @@ fun rememberActiveCloudBridge(): CloudUiBridge? = remember { CloudUiBridgeRegist
 @Composable
 fun CloudHomeBannerFromBridge(
     bridge: CloudUiBridge,
+    singleHomeMode: Boolean = true,
     onOpenManagement: () -> Unit = {}
 ) {
     val cloudState by bridge.state.collectAsState()
@@ -35,12 +36,16 @@ fun CloudHomeBannerFromBridge(
         onCreateHome = bridge::createHome,
         onRetry = bridge::retry,
         onDismissFeedback = bridge::dismissFeedback,
-        onOpenManagement = onOpenManagement
+        onOpenManagement = onOpenManagement,
+        singleHomeMode = singleHomeMode
     )
 }
 
 @Composable
-fun CloudHomeManagementFromBridge(bridge: CloudUiBridge) {
+fun CloudHomeManagementFromBridge(
+    bridge: CloudUiBridge,
+    singleHomeMode: Boolean = true
+) {
     val cloudState by bridge.state.collectAsState()
     CloudHomeManagementCard(
         cloudState = cloudState,
@@ -49,7 +54,8 @@ fun CloudHomeManagementFromBridge(bridge: CloudUiBridge) {
         onLeaveHome = bridge::leaveSelectedHome,
         onRemoveMember = bridge::removeMember,
         onRetry = bridge::retry,
-        onDismissFeedback = bridge::dismissFeedback
+        onDismissFeedback = bridge::dismissFeedback,
+        singleHomeMode = singleHomeMode
     )
 }
 
@@ -64,7 +70,8 @@ fun CloudHomeBannerCard(
     onCreateHome: (String) -> Unit,
     onRetry: () -> Unit,
     onDismissFeedback: () -> Unit = {},
-    onOpenManagement: () -> Unit = {}
+    onOpenManagement: () -> Unit = {},
+    singleHomeMode: Boolean = false
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var showSwitchDialog by rememberSaveable { mutableStateOf(false) }
@@ -88,7 +95,7 @@ fun CloudHomeBannerCard(
                     color = TextDark
                 )
                 StatusPill(
-                    text = statusLabel(cloudState),
+                    text = statusLabel(cloudState, singleHomeMode),
                     color = statusColor(cloudState.status, cloudState.error),
                     background = statusBackground(cloudState.status, cloudState.error)
                 )
@@ -99,7 +106,7 @@ fun CloudHomeBannerCard(
             LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))
         }
 
-        val helperText = statusDescription(cloudState)
+        val helperText = statusDescription(cloudState, singleHomeMode)
         if (helperText != null) {
             Text(
                 text = helperText,
@@ -107,6 +114,10 @@ fun CloudHomeBannerCard(
                 color = if (cloudState.status == CloudStatus.ACCESS_REVOKED || cloudState.status == CloudStatus.ERROR) RedAlert else TextGray,
                 modifier = Modifier.padding(top = 8.dp)
             )
+        }
+
+        if (singleHomeMode && cloudState.status == CloudStatus.READY && cloudState.hasMultipleOwnedHomes) {
+            CloudWarningBanner(text = legacyMultiHomeWarning(cloudState))
         }
 
         cloudState.revokedNotice?.takeIf { cloudState.status == CloudStatus.READY }?.let { notice ->
@@ -127,28 +138,40 @@ fun CloudHomeBannerCard(
 
         when (cloudState.status) {
             CloudStatus.READY -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedButton(
-                        onClick = { showSwitchDialog = true },
-                        enabled = !cloudState.busy,
-                        modifier = Modifier.weight(1f).heightIn(min = 44.dp)
-                    ) {
-                        Icon(Icons.Default.HomeWork, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Nhà (${cloudState.homes.size})")
-                    }
+                if (singleHomeMode) {
                     OutlinedButton(
                         onClick = onOpenManagement,
                         enabled = !cloudState.busy,
-                        modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 44.dp)
                     ) {
-                        Icon(Icons.Default.Group, null, Modifier.size(18.dp))
+                        Icon(Icons.Default.Home, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Thành viên")
+                        Text("Quản lý nhà")
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { showSwitchDialog = true },
+                            enabled = !cloudState.busy,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                        ) {
+                            Icon(Icons.Default.HomeWork, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Nhà (${cloudState.homes.size})")
+                        }
+                        OutlinedButton(
+                            onClick = onOpenManagement,
+                            enabled = !cloudState.busy,
+                            modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                        ) {
+                            Icon(Icons.Default.Group, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Thành viên")
+                        }
                     }
                 }
             }
@@ -207,7 +230,7 @@ fun CloudHomeBannerCard(
         )
     }
 
-    if (showSwitchDialog) {
+    if (!singleHomeMode && showSwitchDialog) {
         HomeSwitcherDialog(
             homes = cloudState.homes,
             selectedHomeId = cloudState.selectedHomeId,
@@ -236,16 +259,23 @@ fun CloudHomeManagementCard(
     onLeaveHome: () -> Unit,
     onRemoveMember: (String) -> Unit,
     onRetry: () -> Unit,
-    onDismissFeedback: () -> Unit = {}
+    onDismissFeedback: () -> Unit = {},
+    singleHomeMode: Boolean = false
 ) {
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var confirmRemoveUid by rememberSaveable { mutableStateOf<String?>(null) }
 
+    val canCreateAction = if (singleHomeMode) {
+        cloudState.status in setOf(CloudStatus.EMPTY, CloudStatus.ACCESS_REVOKED) && cloudState.ownedHomesCount == 0
+    } else {
+        cloudState.status in setOf(CloudStatus.READY, CloudStatus.EMPTY, CloudStatus.ACCESS_REVOKED)
+    }
+
     Column(Modifier.fillMaxWidth().testTag("cloud-home-management")) {
         SectionTitle(
-            text = "Nhà Cloud & thành viên",
-            action = if (cloudState.status in setOf(CloudStatus.READY, CloudStatus.EMPTY, CloudStatus.ACCESS_REVOKED)) "Tạo nhà" else null,
+            text = if (singleHomeMode) "Nhà Cloud" else "Nhà Cloud & thành viên",
+            action = if (canCreateAction) "Tạo nhà" else null,
             onAction = { showCreateDialog = true }
         )
         WhiteCard(Modifier.fillMaxWidth()) {
@@ -254,7 +284,7 @@ fun CloudHomeManagementCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 StatusPill(
-                    text = statusLabel(cloudState),
+                    text = statusLabel(cloudState, singleHomeMode),
                     color = statusColor(cloudState.status, cloudState.error),
                     background = statusBackground(cloudState.status, cloudState.error)
                 )
@@ -273,7 +303,7 @@ fun CloudHomeManagementCard(
                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             }
 
-            val desc = statusDescription(cloudState)
+            val desc = statusDescription(cloudState, singleHomeMode)
             if (desc != null) {
                 Text(
                     text = desc,
@@ -291,7 +321,9 @@ fun CloudHomeManagementCard(
                 CloudNoticeBanner(text = fb.message, isError = fb.isError, onDismiss = onDismissFeedback)
             }
 
-            if (cloudState.status == CloudStatus.EMPTY || cloudState.status == CloudStatus.ACCESS_REVOKED) {
+            if ((cloudState.status == CloudStatus.EMPTY || cloudState.status == CloudStatus.ACCESS_REVOKED) &&
+                (!singleHomeMode || cloudState.ownedHomesCount == 0)
+            ) {
                 Button(
                     onClick = { showCreateDialog = true },
                     enabled = !cloudState.busy,
@@ -314,133 +346,161 @@ fun CloudHomeManagementCard(
             }
 
             if (cloudState.status == CloudStatus.READY) {
-                Text(
-                    text = "Danh sách nhà (${cloudState.homes.size})",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TextDark,
-                    modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    cloudState.homes.forEach { home ->
-                        val selected = home.id == cloudState.selectedHomeId
-                        Surface(
-                            onClick = { onSelectHome(home.id) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (selected) Blue50 else Bg,
-                            border = BorderStroke(1.dp, if (selected) Blue600 else Outline),
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (selected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
-                                    contentDescription = null,
-                                    tint = if (selected) Blue600 else TextGray,
-                                    modifier = Modifier.size(20.dp)
+                if (singleHomeMode) {
+                    if (cloudState.hasMultipleOwnedHomes) {
+                        CloudWarningBanner(text = legacyMultiHomeWarning(cloudState))
+                        Text(
+                            text = "Chọn nhà chính trong phiên (${cloudState.ownedHomesCount})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TextDark,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            cloudState.ownedHomes.forEach { home ->
+                                HomeChoiceRow(
+                                    home = home,
+                                    selected = home.id == cloudState.selectedHomeId,
+                                    onClick = { onSelectHome(home.id) }
                                 )
-                                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                                    Text(
-                                        text = home.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = TextDark
-                                    )
-                                    Text(
-                                        text = roleLabel(home.role),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (home.role == CloudRole.OWNER) Blue600 else TextGray
-                                    )
-                                }
                             }
                         }
-                    }
-                }
-
-                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Outline)
-
-                val selectedHome = cloudState.selectedHome
-                if (selectedHome != null) {
-                    Text(
-                        text = "Thành viên · ${selectedHome.name}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = TextDark
-                    )
-                    when (cloudState.membersStatus) {
-                        MembersStatus.LOADING -> {
-                            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-                            Text(
-                                text = "Đang tải danh sách thành viên…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextGray,
-                                modifier = Modifier.padding(top = 6.dp)
-                            )
-                        }
-                        MembersStatus.ACCESS_REVOKED -> {
-                            Text(
-                                text = cloudState.membersErrorMessage ?: "Quyền truy cập nhà này đã bị thu hồi.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = RedAlert,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-                        MembersStatus.ERROR -> {
-                            Text(
-                                text = cloudState.membersErrorMessage ?: "Không thể tải danh sách thành viên.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = RedAlert,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-                        MembersStatus.IDLE -> Unit
-                        MembersStatus.READY -> {
-                            if (cloudState.members.isEmpty()) {
-                                Text(
-                                    text = "Chưa có thành viên nào.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextGray,
-                                    modifier = Modifier.padding(top = 6.dp)
-                                )
-                            } else {
-                                Column(
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    } else {
+                        val primaryHome = cloudState.selectedHome ?: cloudState.ownedHomes.firstOrNull()
+                        if (primaryHome != null) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Blue50,
+                                border = BorderStroke(1.dp, Blue600),
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    cloudState.members.forEach { member ->
-                                        MemberRow(
-                                            member = member,
-                                            isSelf = member.uid == cloudState.currentUid,
-                                            canRemove = cloudState.canRemoveMember(member),
-                                            onRemoveClick = { confirmRemoveUid = member.uid }
+                                    Icon(
+                                        imageVector = Icons.Default.Home,
+                                        contentDescription = null,
+                                        tint = Blue600,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                        Text(
+                                            text = primaryHome.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextDark
+                                        )
+                                        Text(
+                                            text = roleLabel(primaryHome.role),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Blue600
                                         )
                                     }
                                 }
                             }
                         }
                     }
-
-                    if (cloudState.canLeaveSelectedHome) {
-                        OutlinedButton(
-                            onClick = { confirmLeave = true },
-                            enabled = !cloudState.busy,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAlert),
-                            border = BorderStroke(1.dp, RedAlert),
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 44.dp)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ExitToApp, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Rời khỏi nhà")
+                } else {
+                    Text(
+                        text = "Danh sách nhà (${cloudState.homes.size})",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = TextDark,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        cloudState.homes.forEach { home ->
+                            HomeChoiceRow(
+                                home = home,
+                                selected = home.id == cloudState.selectedHomeId,
+                                onClick = { onSelectHome(home.id) }
+                            )
                         }
                     }
 
-                    if (cloudState.isCurrentUserOwner) {
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Outline)
+
+                    val selectedHome = cloudState.selectedHome
+                    if (selectedHome != null) {
                         Text(
-                            text = "Mời thành viên mới (Invitation / Join / QR) thuộc giai đoạn thiết kế hợp đồng riêng.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextGray,
-                            modifier = Modifier.padding(top = 10.dp)
+                            text = "Thành viên · ${selectedHome.name}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TextDark
                         )
+                        when (cloudState.membersStatus) {
+                            MembersStatus.LOADING -> {
+                                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                                Text(
+                                    text = "Đang tải danh sách thành viên…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextGray,
+                                    modifier = Modifier.padding(top = 6.dp)
+                                )
+                            }
+                            MembersStatus.ACCESS_REVOKED -> {
+                                Text(
+                                    text = cloudState.membersErrorMessage ?: "Quyền truy cập nhà này đã bị thu hồi.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = RedAlert,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            MembersStatus.ERROR -> {
+                                Text(
+                                    text = cloudState.membersErrorMessage ?: "Không thể tải danh sách thành viên.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = RedAlert,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                            MembersStatus.IDLE -> Unit
+                            MembersStatus.READY -> {
+                                if (cloudState.members.isEmpty()) {
+                                    Text(
+                                        text = "Chưa có thành viên nào.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextGray,
+                                        modifier = Modifier.padding(top = 6.dp)
+                                    )
+                                } else {
+                                    Column(
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        cloudState.members.forEach { member ->
+                                            MemberRow(
+                                                member = member,
+                                                isSelf = member.uid == cloudState.currentUid,
+                                                canRemove = cloudState.canRemoveMember(member),
+                                                onRemoveClick = { confirmRemoveUid = member.uid }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (cloudState.canLeaveSelectedHome) {
+                            OutlinedButton(
+                                onClick = { confirmLeave = true },
+                                enabled = !cloudState.busy,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAlert),
+                                border = BorderStroke(1.dp, RedAlert),
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 44.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ExitToApp, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Rời khỏi nhà")
+                            }
+                        }
+
+                        if (cloudState.isCurrentUserOwner) {
+                            Text(
+                                text = "Mời thành viên mới (Invitation / Join / QR) thuộc giai đoạn thiết kế hợp đồng riêng.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextGray,
+                                modifier = Modifier.padding(top = 10.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -694,17 +754,92 @@ private fun HomeSwitcherDialog(
     )
 }
 
+@Composable
+private fun HomeChoiceRow(
+    home: CloudHome,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) Blue50 else Bg,
+        border = BorderStroke(1.dp, if (selected) Blue600 else Outline),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (selected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) Blue600 else TextGray,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(
+                    text = home.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = TextDark
+                )
+                Text(
+                    text = roleLabel(home.role),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (home.role == CloudRole.OWNER) Blue600 else TextGray
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CloudWarningBanner(text: String) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = YellowSoft,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = null,
+                tint = OrangeWarn,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = OrangeWarn,
+                modifier = Modifier.weight(1f).padding(start = 8.dp)
+            )
+        }
+    }
+}
+
+private fun legacyMultiHomeWarning(state: CloudUiState): String =
+    "Phát hiện ${state.ownedHomesCount} nhà Cloud trên tài khoản cũ. " +
+        "Đang dùng nhà chính \"${state.selectedHome?.name.orEmpty()}\". Hệ thống không tự xóa nhà cũ."
+
 private fun roleLabel(role: CloudRole): String = when (role) {
     CloudRole.OWNER -> "Chủ nhà (OWNER)"
     CloudRole.MEMBER -> "Thành viên (MEMBER)"
 }
 
-private fun statusLabel(state: CloudUiState): String = when (state.status) {
+private fun statusLabel(state: CloudUiState, singleHomeMode: Boolean = false): String = when (state.status) {
     CloudStatus.UNAVAILABLE -> "Cloud chưa khả dụng"
     CloudStatus.SIGNED_OUT -> "Chưa đăng nhập"
     CloudStatus.LOADING -> "Đang tải Cloud…"
     CloudStatus.EMPTY -> "Chưa có nhà"
-    CloudStatus.READY -> state.selectedHome?.let { roleLabel(it.role) } ?: "Đã kết nối Cloud"
+    CloudStatus.READY -> if (singleHomeMode) {
+        "Chủ sở hữu · Đã kết nối Cloud"
+    } else {
+        state.selectedHome?.let { roleLabel(it.role) } ?: "Đã kết nối Cloud"
+    }
     CloudStatus.ACCESS_REVOKED -> "Mất quyền truy cập nhà"
     CloudStatus.ERROR -> when (state.error) {
         CloudError.PermissionDenied -> "Bị từ chối bởi Rules"
@@ -713,11 +848,15 @@ private fun statusLabel(state: CloudUiState): String = when (state.status) {
     }
 }
 
-private fun statusDescription(state: CloudUiState): String? = when (state.status) {
+private fun statusDescription(state: CloudUiState, singleHomeMode: Boolean = false): String? = when (state.status) {
     CloudStatus.UNAVAILABLE -> "Ứng dụng chưa có cấu hình Cloud hợp lệ. Điều khiển ESP32 qua LAN vẫn hoạt động bình thường."
     CloudStatus.SIGNED_OUT -> "Đăng nhập bằng tài khoản Firebase để đồng bộ danh sách nhà và thành viên."
     CloudStatus.LOADING -> "Đang tải danh sách nhà cho tài khoản hiện tại…"
-    CloudStatus.EMPTY -> "Tài khoản hiện chưa thuộc nhà Cloud nào. Bạn có thể tạo nhà mới."
+    CloudStatus.EMPTY -> if (singleHomeMode && state.hasOnlyMemberHomes) {
+        "Tài khoản đang chỉ tham gia nhà được chia sẻ; chế độ chia sẻ nhiều thành viên hiện tạm hoãn. Bạn có thể tạo nhà riêng cho ESP32 của mình."
+    } else {
+        "Tài khoản hiện chưa thuộc nhà Cloud nào. Bạn có thể tạo nhà mới."
+    }
     CloudStatus.ACCESS_REVOKED -> state.revokedNotice ?: "Quyền truy cập vào nhà trước đó đã bị thu hồi hoặc nhà không còn tồn tại."
     CloudStatus.ERROR -> state.errorMessage ?: "Không thể kết nối Cloud. Điều khiển ESP32 qua LAN vẫn hoạt động bình thường."
     CloudStatus.READY -> null

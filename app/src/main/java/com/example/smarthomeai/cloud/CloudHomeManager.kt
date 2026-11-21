@@ -67,6 +67,21 @@ data class CloudUiState(
     val canLeaveSelectedHome: Boolean
         get() = selectedHome != null && currentUserRole == CloudRole.MEMBER && !busy
 
+    val ownedHomes: List<CloudHome>
+        get() = homes.filter { it.role == CloudRole.OWNER }
+
+    val ownedHomesCount: Int
+        get() = ownedHomes.size
+
+    val hasMultipleOwnedHomes: Boolean
+        get() = ownedHomesCount > 1
+
+    val ignoredMemberHomesCount: Int
+        get() = homes.count { it.role == CloudRole.MEMBER }
+
+    val hasOnlyMemberHomes: Boolean
+        get() = ownedHomesCount == 0 && ignoredMemberHomesCount > 0
+
     fun canRemoveMember(member: CloudMember): Boolean =
         selectedHome != null &&
             currentUserRole == CloudRole.OWNER &&
@@ -125,7 +140,8 @@ object CloudUiBridgeRegistry {
 class CloudHomeManager(
     private val scope: CoroutineScope,
     private val session: CloudSession,
-    private val repository: CloudRepository
+    private val repository: CloudRepository,
+    private val singleHomeMode: Boolean = false
 ) : CloudUiBridge {
 
     private val _uiState = MutableStateFlow(CloudUiState())
@@ -292,19 +308,22 @@ class CloudHomeManager(
         val current = _uiState.value
         val uid = current.currentUid ?: return
         if (current.status != CloudStatus.READY) return
-        if (current.homes.none { it.id == homeId }) return
+        val targetHome = current.homes.firstOrNull { it.id == homeId } ?: return
+        if (singleHomeMode && targetHome.role != CloudRole.OWNER) return
         if (current.selectedHomeId == homeId) return
         _uiState.update {
             it.copy(
                 selectedHomeId = homeId,
-                membersStatus = MembersStatus.LOADING,
+                membersStatus = if (singleHomeMode) MembersStatus.IDLE else MembersStatus.LOADING,
                 members = emptyList(),
                 membersError = null,
                 membersErrorMessage = null,
                 feedback = null
             )
         }
-        switchMemberObserver(gen, uid, homeId)
+        if (!singleHomeMode) {
+            switchMemberObserver(gen, uid, homeId)
+        }
     }
 
     override fun createHome(name: String) {
@@ -319,6 +338,26 @@ class CloudHomeManager(
             return
         }
         if (current.busy) return
+        if (singleHomeMode) {
+            if (current.status == CloudStatus.LOADING || current.homes.any { it.role == CloudRole.OWNER }) {
+                setFeedback(
+                    gen,
+                    isError = true,
+                    error = CloudError.Conflict,
+                    message = "Tài khoản đã có nhà Cloud. Mô hình hiện tại chỉ hỗ trợ một nhà."
+                )
+                return
+            }
+            if (current.status !in setOf(CloudStatus.EMPTY, CloudStatus.ACCESS_REVOKED)) {
+                setFeedback(
+                    gen,
+                    isError = true,
+                    error = current.error ?: CloudError.Conflict,
+                    message = "Chưa xác minh được trạng thái nhà Cloud. Vui lòng thử lại."
+                )
+                return
+            }
+        }
 
         val normalized = try {
             RtdbPayloadBuilder.validateAndNormalizeHomeName(name)
@@ -349,7 +388,7 @@ class CloudHomeManager(
                         }
                     }
                     val uid = _uiState.value.currentUid
-                    if (uid != null && _uiState.value.homes.any { it.id == res.data }) {
+                    if (!singleHomeMode && uid != null && _uiState.value.homes.any { it.id == res.data }) {
                         switchMemberObserver(gen, uid, res.data)
                     }
                 }
@@ -524,6 +563,11 @@ class CloudHomeManager(
             }
             is CloudResult.Ok -> {
                 val validHomes = result.data.filterNot { it.id in revokedHomeIds }
+                val candidateHomes = if (singleHomeMode) {
+                    validHomes.filter { it.role == CloudRole.OWNER }
+                } else {
+                    validHomes
+                }
                 val previous = _uiState.value
                 val prevSelectedId = previous.selectedHomeId
                 val prevSelectedHome = previous.selectedHome
@@ -532,24 +576,32 @@ class CloudHomeManager(
                 val nextSelectedId: String?
                 var nextRevokedNotice = previous.revokedNotice
 
-                if (pendingId != null && validHomes.any { it.id == pendingId }) {
+                if (pendingId != null && candidateHomes.any { it.id == pendingId }) {
                     nextSelectedId = pendingId
                     pendingCreatedHomeId = null
                     nextRevokedNotice = null
-                } else if (prevSelectedId != null && validHomes.any { it.id == prevSelectedId }) {
+                } else if (prevSelectedId != null && candidateHomes.any { it.id == prevSelectedId }) {
                     nextSelectedId = prevSelectedId
                 } else {
-                    if (prevSelectedHome != null && prevSelectedId != selfLeavingHomeId) {
-                        nextRevokedNotice = "Bạn không còn quyền truy cập nhà \"${prevSelectedHome.name}\" hoặc nhà đã bị xóa."
+                    val lostPreviousHome = prevSelectedHome != null &&
+                        (!singleHomeMode || prevSelectedHome.role == CloudRole.OWNER) &&
+                        prevSelectedId != selfLeavingHomeId
+                    if (lostPreviousHome) {
+                        nextRevokedNotice = "Bạn không còn quyền truy cập nhà \"${prevSelectedHome?.name}\" hoặc nhà đã bị xóa."
                     }
                     if (prevSelectedId == selfLeavingHomeId) {
                         selfLeavingHomeId = null
                     }
-                    nextSelectedId = validHomes.firstOrNull()?.id
+                    nextSelectedId = if (singleHomeMode) {
+                        candidateHomes.minByOrNull { it.id }?.id
+                    } else {
+                        candidateHomes.firstOrNull()?.id
+                    }
                 }
 
                 val nextStatus = when {
-                    validHomes.isNotEmpty() -> CloudStatus.READY
+                    candidateHomes.isNotEmpty() -> CloudStatus.READY
+                    singleHomeMode && validHomes.isNotEmpty() -> CloudStatus.EMPTY
                     nextRevokedNotice != null || previous.status == CloudStatus.ACCESS_REVOKED -> CloudStatus.ACCESS_REVOKED
                     else -> CloudStatus.EMPTY
                 }
@@ -567,17 +619,18 @@ class CloudHomeManager(
                         revokedNotice = nextRevokedNotice,
                         membersStatus = when {
                             nextSelectedId == null && nextStatus == CloudStatus.ACCESS_REVOKED -> MembersStatus.ACCESS_REVOKED
-                            nextSelectedId == null -> MembersStatus.IDLE
+                            singleHomeMode || nextSelectedId == null -> MembersStatus.IDLE
                             selectionChanged -> MembersStatus.LOADING
                             else -> cur.membersStatus
                         },
-                        members = if (nextSelectedId == null || selectionChanged) emptyList() else cur.members,
-                        membersError = if (nextSelectedId == null || selectionChanged) null else cur.membersError,
-                        membersErrorMessage = if (nextSelectedId == null || selectionChanged) null else cur.membersErrorMessage
+                        members = if (singleHomeMode || nextSelectedId == null || selectionChanged) emptyList() else cur.members,
+                        membersError = if (singleHomeMode || nextSelectedId == null || selectionChanged) null else cur.membersError,
+                        membersErrorMessage = if (singleHomeMode || nextSelectedId == null || selectionChanged) null else cur.membersErrorMessage
                     )
                 }
-                if (activeSelectedHomeId != nextSelectedId) {
-                    switchMemberObserver(gen, uid, nextSelectedId)
+                val targetObserverHomeId = if (singleHomeMode) null else nextSelectedId
+                if (activeSelectedHomeId != targetObserverHomeId) {
+                    switchMemberObserver(gen, uid, targetObserverHomeId)
                 }
             }
         }

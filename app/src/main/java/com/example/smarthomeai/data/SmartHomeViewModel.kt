@@ -35,7 +35,7 @@ class SmartHomeViewModel internal constructor(
     private val _loggedIn = MutableStateFlow(auth.isSignedIn())
     val loggedIn = _loggedIn.asStateFlow()
     val firebaseConfigured get() = auth.configured
-    private val cloudManager = CloudHomeManager(viewModelScope, cloudComponents.session, cloudComponents.repository)
+    private val cloudManager = CloudHomeManager(viewModelScope, cloudComponents.session, cloudComponents.repository, singleHomeMode = true)
     val cloudState: StateFlow<CloudUiState> = cloudManager.state
     private var lastSample = 0L
     private var lastMotionAlert = 0L
