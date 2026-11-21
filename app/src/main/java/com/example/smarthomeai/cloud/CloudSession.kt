@@ -25,5 +25,6 @@ interface CloudSession {
  */
 data class CloudComponents(
     val session: CloudSession,
-    val repository: CloudRepository
+    val repository: CloudRepository,
+    val deviceRepository: CloudDeviceRepository? = null
 )

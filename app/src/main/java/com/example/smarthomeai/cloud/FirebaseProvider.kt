@@ -166,7 +166,8 @@ object CloudFoundationFactory {
         val provider = FirebaseProvider(context)
         return CloudComponents(
             session = FirebaseCloudSession(provider),
-            repository = RtdbCloudRepository(provider)
+            repository = RtdbCloudRepository(provider),
+            deviceRepository = RtdbDeviceRepository(provider)
         )
     }
 }
