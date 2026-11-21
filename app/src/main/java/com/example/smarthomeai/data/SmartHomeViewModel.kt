@@ -7,11 +7,14 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.smarthomeai.cloud.CloudComponents
+import com.example.smarthomeai.cloud.CloudDeviceUiBridgeRegistry
 import com.example.smarthomeai.cloud.CloudFoundationFactory
+import com.example.smarthomeai.cloud.CloudGatewaySync
 import com.example.smarthomeai.cloud.CloudHomeManager
 import com.example.smarthomeai.cloud.CloudSessionSyncEvaluator
 import com.example.smarthomeai.cloud.CloudUiBridgeRegistry
 import com.example.smarthomeai.cloud.CloudUiState
+import com.example.smarthomeai.cloud.toGatewayInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -38,6 +41,19 @@ class SmartHomeViewModel internal constructor(
     val firebaseConfigured get() = auth.configured
     private val cloudManager = CloudHomeManager(viewModelScope, cloudComponents.session, cloudComponents.repository, singleHomeMode = true)
     val cloudState: StateFlow<CloudUiState> = cloudManager.state
+    private val gatewayInputFlow = _state
+        .map { it.toGatewayInput() }
+        .flowOn(Dispatchers.Default)
+        .distinctUntilChanged()
+    private val gatewaySync: CloudGatewaySync? = cloudComponents.deviceRepository?.let { deviceRepo ->
+        CloudGatewaySync(
+            scope = viewModelScope,
+            cloudStateFlow = cloudManager.state,
+            gatewayInputFlow = gatewayInputFlow,
+            deviceRepository = deviceRepo,
+            workContext = Dispatchers.IO
+        )
+    }
     private val _reauthRequired = MutableStateFlow(false)
     val reauthRequired: StateFlow<Boolean> = _reauthRequired.asStateFlow()
     private var observedCloudUid: String? = null
@@ -51,6 +67,7 @@ class SmartHomeViewModel internal constructor(
 
     init {
         CloudUiBridgeRegistry.register(cloudManager)
+        gatewaySync?.let { CloudDeviceUiBridgeRegistry.register(it) }
         viewModelScope.launch {
             combine(
                 _loggedIn,
@@ -125,6 +142,10 @@ class SmartHomeViewModel internal constructor(
     fun dismissCloudFeedback() = cloudManager.dismissFeedback()
 
     override fun onCleared() {
+        gatewaySync?.let {
+            CloudDeviceUiBridgeRegistry.unregister(it)
+            it.clear()
+        }
         CloudUiBridgeRegistry.unregister(cloudManager)
         cloudManager.clear()
         super.onCleared()
