@@ -7,6 +7,7 @@ import java.net.URL
 object Esp32Client {
     @Volatile var lastError: String? = null
         private set
+    internal var connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
     fun validIp(ip: String): Boolean = ip.split('.').let { parts ->
         parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && (it.toIntOrNull() ?: -1) in 0..255 }
     }
@@ -17,7 +18,7 @@ object Esp32Client {
         if(key.isNotEmpty() && !validKey(key)) { lastError = "Khóa thiết bị cần 12–64 ký tự chữ, số, gạch ngang hoặc gạch dưới."; return null }
         var connection: HttpURLConnection? = null
         return try {
-            connection = URL("http://$ip/$path").openConnection() as HttpURLConnection
+            connection = connectionFactory(URL("http://$ip/$path"))
             connection.requestMethod = method
             connection.connectTimeout = 2000; connection.readTimeout = 2000; connection.useCaches = false
             if(key.isNotEmpty()) connection.setRequestProperty("X-Device-Key",key)
@@ -26,7 +27,10 @@ object Esp32Client {
                 lastError = when(code) {
                     401,403 -> "Khóa ESP32 chưa đúng. Mở Cài đặt và nhập khóa trùng với firmware."
                     409 -> "ESP32 đang bảo vệ. Hãy xác nhận tắt bảo vệ trước khi điều khiển."
-                    412 -> "Đang mưa và tự thu đang bật. Chưa thể đưa giàn phơi ra ngoài."
+                    412 -> if(path.startsWith("window") || path.startsWith("fan"))
+                        "Đang có khói vượt ngưỡng và chế độ tự động đang bật. Giữ cửa sổ và quạt mở để thoát khói."
+                    else
+                        "Đang mưa và tự thu đang bật. Chưa thể đưa giàn phơi ra ngoài."
                     423 -> "Vùng cửa chưa sẵn sàng. Kiểm tra vật cản và cảm biến khoảng cách rồi thử lại."
                     503 -> "ESP32 chưa sẵn sàng. Kiểm tra DEVICE_KEY trong firmware."
                     else -> "ESP32 trả lỗi $code. Kiểm tra firmware và thử lại."
@@ -43,6 +47,14 @@ object Esp32Client {
         request(ip,"clothesline?state=${if(retracted) 1 else 0}",key,"POST")?.trim() == "OK"
     fun sendRainRetraction(ip: String, enabled: Boolean, key: String = "") =
         request(ip,"clothesline/auto?enabled=${if(enabled) 1 else 0}",key,"POST")?.trim() == "OK"
+    fun sendWindow(ip: String, open: Boolean, key: String = "") =
+        request(ip,"window?state=${if(open) 1 else 0}",key,"POST")?.trim() == "OK"
+    fun sendFan(ip: String, on: Boolean, key: String = "") =
+        request(ip,"fan?state=${if(on) 1 else 0}",key,"POST")?.trim() == "OK"
+    fun sendSmokeConfig(ip: String, autoEnabled: Boolean, thresholdPpm: Int, key: String = ""): Boolean {
+        if(thresholdPpm !in MIN_WIRE_SMOKE_LIMIT_PPM..MAX_WIRE_SMOKE_LIMIT_PPM) return false
+        return request(ip,"smoke/config?auto=${if(autoEnabled) 1 else 0}&threshold=$thresholdPpm",key,"POST")?.trim() == "OK"
+    }
     fun sendMode(ip: String, mode: HomeMode, key: String) = request(ip,"mode?value=${mode.name}",key,"POST")?.trim() == "OK"
     fun sendAlarmSettings(ip: String, settings: AlarmSettings, key: String = ""): Boolean {
         if(settings.durationSeconds !in 5..60) return false

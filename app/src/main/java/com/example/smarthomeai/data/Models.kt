@@ -15,13 +15,13 @@ enum class CommandPhase { SENDING, SUCCESS, ERROR }
 data class DeviceCommand(val phase: CommandPhase, val message: String)
 data class LogItem(val kind: String, val title: String, val time: String)
 data class FaceRecord(val name: String, val time: String, val known: Boolean)
-enum class AlertType { MOTION, STRANGER, DOOR, LOGIN, ENVIRONMENT }
+enum class AlertType { MOTION, STRANGER, DOOR, LOGIN, ENVIRONMENT, SMOKE }
 data class AlertItem(
     val type: AlertType, val title: String, val time: String,
     val id: String = UUID.randomUUID().toString(), val timestamp: Long = System.currentTimeMillis(),
     val reviewed: Boolean = false, val imagePath: String? = null, val incidentKey: String? = null
 )
-data class SensorSample(val timestamp: Long, val temperature: Int, val humidity: Int)
+data class SensorSample(val timestamp: Long, val temperature: Int, val humidity: Int, val smokePpm: Int? = null)
 data class SmartHomeState(
     val temperature: Int? = null, val humidity: Int? = null, val motionDetected: Boolean = false,
     val light: Boolean = false, val doorOpen: Boolean = false, val alarm: Boolean = false,
@@ -42,7 +42,12 @@ data class SmartHomeState(
     val deviceEvents: List<DeviceEvent> = emptyList(), val eventStream: String = "", val eventCursor: Long = 0,
     val syncMessage: String? = null, val hardware: HardwareStatus? = null,
     val clothesBusy: Boolean = false, val clothesMessage: String? = null, val faceDoorMessage: String? = null,
-    val alarmSettingsBusy: Boolean = false, val alarmSettingsMessage: String? = null
+    val alarmSettingsBusy: Boolean = false, val alarmSettingsMessage: String? = null,
+    val smokeAlertsEnabled: Boolean = true,
+    val smokeLimit: Int = DEFAULT_SMOKE_LIMIT_PPM,
+    val smokeAutoVentilation: Boolean = true,
+    val ventilationBusy: Boolean = false,
+    val ventilationMessage: String? = null
 ) {
     fun deviceOn(type: DeviceType) = when(type) {
         DeviceType.LIGHT -> light
