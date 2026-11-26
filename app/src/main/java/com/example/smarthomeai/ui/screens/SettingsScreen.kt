@@ -23,13 +23,15 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
                    onConnection: (String, String) -> Unit = { ip, _ -> onIpChange(ip) },
                    onEnvironmentConfig: (Boolean, Int, Int, Int) -> Unit = { _, _, _, _ -> },
                    onDoorReminder: (Boolean) -> Unit = {},
-                   cloudBridge: CloudUiBridge? = rememberActiveCloudBridge()) {
+                   cloudBridge: CloudUiBridge? = rememberActiveCloudBridge(),
+                   onSmokeConfig: (Boolean, Int, Boolean) -> Unit = { _, _, _ -> }) {
     var showIp by rememberSaveable { mutableStateOf(false) }
     var ip by rememberSaveable(state.esp32Ip) { mutableStateOf(state.esp32Ip) }
     var deviceKey by rememberSaveable(state.deviceKey) { mutableStateOf(state.deviceKey) }
     var deleteName by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var showEnvironment by rememberSaveable { mutableStateOf(false) }
+    var showSmokeConfig by rememberSaveable { mutableStateOf(false) }
     var showInfo by rememberSaveable { mutableStateOf(false) }
     AppPage("Cài đặt", "", "settings", onNavigate) {
         item {
@@ -52,6 +54,11 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
                 SettingsLink("Cảnh báo môi trường", Icons.Default.Thermostat,
                     if (state.environmentAlerts) "${state.coldLimit}–${state.temperatureLimit}°C" else "Đang tắt") {
                     showEnvironment = true
+                }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Outline)
+                SettingsLink("Cảnh báo khói MQ-2", Icons.Default.Air,
+                    if (state.smokeAlertsEnabled) "Từ ${state.smokeLimit} ppm · ${if (state.effectiveSmokeAuto) "Tự thông gió" else "Chỉ báo"}" else "Đang tắt") {
+                    showSmokeConfig = true
                 }
                 if (state.esp32Online && state.rulesSupported) {
                     Preference("Cảnh báo cửa mở quá lâu", "Báo khi cửa mở quá 2 phút.",
@@ -98,6 +105,10 @@ fun SettingsScreen(state: SmartHomeState, onIpChange: (String) -> Unit, onAutoAl
     if (showEnvironment) EnvironmentConfigDialog(state, { showEnvironment = false }) { enabled, hot, humidity, cold ->
         onEnvironmentConfig(enabled, hot, humidity, cold)
         showEnvironment = false
+    }
+    if (showSmokeConfig) SmokeConfigDialog(state, { showSmokeConfig = false }) { alerts, limit, auto ->
+        onSmokeConfig(alerts, limit, auto)
+        showSmokeConfig = false
     }
     if(showIp) AlertDialog(onDismissRequest = { showIp = false }, title = { Text("Kết nối ESP32") },
         text = { Column {

@@ -29,11 +29,13 @@ import kotlin.math.roundToInt
 @Composable
 fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: (String) -> Unit,
                       onEnvironmentConfig: (Boolean, Int, Int, Int) -> Unit = { _, _, _, _ -> },
-                      onBack: () -> Unit = { onNavigate("home") }, mainPage: Boolean = false) {
-    var temperature by rememberSaveable { mutableStateOf(true) }
+                      onBack: () -> Unit = { onNavigate("home") }, mainPage: Boolean = false,
+                      onSmokeConfig: (Boolean, Int, Boolean) -> Unit = { _, _, _ -> }) {
+    var metric by rememberSaveable { mutableStateOf("temp") }
     var range by rememberSaveable { mutableStateOf(HistoryRange.LIVE) }
     var exportRange by rememberSaveable { mutableStateOf(HistoryRange.DAY) }
     var showConfig by rememberSaveable { mutableStateOf(false) }
+    var showSmokeConfig by rememberSaveable { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var exportSamples by remember { mutableStateOf(emptyList<SensorSample>()) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
@@ -41,7 +43,12 @@ fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: 
     var metricMenu by remember { mutableStateOf(false) }
     var logFilter by rememberSaveable { mutableStateOf("all") }
     val samples = if(range==HistoryRange.LIVE) state.liveSamples.inRange(HistoryRange.LIVE) else state.samples.inRange(range)
-    val summary = summarize(samples, temperature)
+    val chartSamples = if(metric == "smoke") samples.filter { it.smokePpm != null } else samples
+    val summary = when(metric) {
+        "temp" -> summarize(samples, true)
+        "hum" -> summarize(samples, false)
+        else -> summarizeSmoke(samples)
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -70,6 +77,11 @@ fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: 
                     if (state.environmentAlerts) "${state.coldLimit}–${state.temperatureLimit}°C" else "Đang tắt") {
                     showConfig = true
                 }
+                HorizontalDivider(color = Outline)
+                SettingsLink("Cảnh báo khói MQ-2 & Thông gió", Icons.Default.Air,
+                    if (state.smokeAlertsEnabled) "Từ ${state.smokeLimit} ppm · ${if (state.effectiveSmokeAuto) "Tự thông gió" else "Chỉ báo"}" else "Đang tắt") {
+                    showSmokeConfig = true
+                }
             }
         }
         item {
@@ -77,12 +89,13 @@ fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
                         TextButton(onClick = { metricMenu = true }, contentPadding = PaddingValues(0.dp)) {
-                            Text(if(temperature) "Nhiệt độ" else "Độ ẩm", style = MaterialTheme.typography.titleMedium)
+                            Text(when(metric) { "temp" -> "Nhiệt độ"; "hum" -> "Độ ẩm"; else -> "Khói MQ-2" }, style = MaterialTheme.typography.titleMedium)
                             Icon(Icons.Default.ArrowDropDown, null)
                         }
                         DropdownMenu(metricMenu, { metricMenu = false }) {
-                            DropdownMenuItem(text = { Text("Nhiệt độ") }, onClick = { temperature = true; metricMenu = false })
-                            DropdownMenuItem(text = { Text("Độ ẩm") }, onClick = { temperature = false; metricMenu = false })
+                            DropdownMenuItem(text = { Text("Nhiệt độ") }, onClick = { metric = "temp"; metricMenu = false })
+                            DropdownMenuItem(text = { Text("Độ ẩm") }, onClick = { metric = "hum"; metricMenu = false })
+                            DropdownMenuItem(text = { Text("Khói MQ-2") }, onClick = { metric = "smoke"; metricMenu = false })
                         }
                     }
                     IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Làm mới dữ liệu", tint = TextGray) }
@@ -90,17 +103,25 @@ fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HistoryRange.entries.forEach { option -> FilterChip(range == option, { range = option }, label = { Text(option.label) }) }
                 }
-                if(samples.size < 2) EmptyHint(if(range==HistoryRange.LIVE) "Đang chờ dữ liệu trực tiếp. Cập nhật khoảng mỗi giây." else "Chưa đủ dữ liệu. App lưu một mẫu mỗi phút khi kết nối.")
+                if(chartSamples.size < 2) EmptyHint(
+                    if(metric == "smoke") "Chưa đủ số đo khói MQ-2 (ppm) để vẽ biểu đồ."
+                    else if(range==HistoryRange.LIVE) "Đang chờ dữ liệu trực tiếp. Cập nhật khoảng mỗi giây."
+                    else "Chưa đủ dữ liệu. App lưu một mẫu mỗi phút khi kết nối."
+                )
                 else {
-                    SensorChart(samples, temperature)
+                    if(metric == "smoke") {
+                        SensorChart(chartSamples, false, valueSelector = { (it.smokePpm ?: 0).toFloat() }, labelName = "khói MQ-2 (ppm)")
+                    } else {
+                        SensorChart(chartSamples, metric == "temp")
+                    }
                     val format = SimpleDateFormat(when(range) {HistoryRange.WEEK->"dd/MM HH:mm";HistoryRange.LIVE->"HH:mm:ss";HistoryRange.DAY->"HH:mm"}, Locale("vi", "VN"))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(format.format(Date(samples.first().timestamp)), style = MaterialTheme.typography.bodySmall, color = TextGray)
-                        Text(format.format(Date(samples.last().timestamp)), style = MaterialTheme.typography.bodySmall, color = TextGray)
+                        Text(format.format(Date(chartSamples.first().timestamp)), style = MaterialTheme.typography.bodySmall, color = TextGray)
+                        Text(format.format(Date(chartSamples.last().timestamp)), style = MaterialTheme.typography.bodySmall, color = TextGray)
                     }
                 }
                 summary?.let {
-                    val unit = if(temperature) "°C" else "%"
+                    val unit = when(metric) { "temp" -> "°C"; "hum" -> "%"; else -> " ppm" }
                     Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Statistic("Thấp nhất", "${it.minimum}$unit")
                         Statistic("Trung bình", "${String.format(Locale.US, "%.1f", it.average)}$unit")
@@ -142,6 +163,9 @@ fun EnvironmentScreen(state: SmartHomeState, onRefresh: () -> Unit, onNavigate: 
     if(showConfig) EnvironmentConfigDialog(state, { showConfig = false }) { enabled, temp, hum, cold ->
         onEnvironmentConfig(enabled, temp, hum, cold); showConfig = false
     }
+    if(showSmokeConfig) SmokeConfigDialog(state, { showSmokeConfig = false }) { alerts, limit, auto ->
+        onSmokeConfig(alerts, limit, auto); showSmokeConfig = false
+    }
 }
 
 @Composable
@@ -167,6 +191,20 @@ fun LiveSensorsCard(state: SmartHomeState) {
         SensorDetail("Hồng ngoại",h?.obstacle?.let {if(it) "Có vật cản" else "Không có vật cản"} ?: "Chưa có dữ liệu")
         SensorDetail("Mưa",h?.raining?.let {if(it) "Có mưa" else "Không có mưa"} ?: "Chưa có dữ liệu")
         SensorDetail("Khoảng cách",h?.distanceCm?.let {"%.1f cm".format(Locale.US,it)} ?: "Chưa có phản hồi")
+        SensorDetail(
+            "Khói MQ-2",
+            when {
+                h?.smokePpm != null -> if (state.smokeHazardActive) "${h.smokePpm} ppm · Vượt ngưỡng" else "${h.smokePpm} ppm"
+                h?.hasMq2 == true -> if (!state.esp32Online) "Mất kết nối" else "Đang làm nóng cảm biến"
+                else -> "Chưa gắn cảm biến"
+            }
+        )
+        if (h?.hasWindow == true) {
+            SensorDetail("Cửa sổ", when (h.windowOpen) { true -> "Đang mở"; false -> "Đã đóng"; null -> "Chưa rõ" })
+        }
+        if (h?.hasFan == true) {
+            SensorDetail("Quạt thông gió", when (h.fanOn) { true -> "Đang bật"; false -> "Đang tắt"; null -> "Chưa rõ" })
+        }
         SensorDetail("Báo động",if(state.lastSeen==0L) "Chưa có dữ liệu" else if(state.alarmActive) "Đang bật" else "Đang tắt")
         if(!state.esp32Online) Text("Chờ kết nối lại để nhận số đo mới.",style=MaterialTheme.typography.bodySmall,color=OrangeWarn)
         Text(if(state.environmentAlerts) "Nóng từ ${state.temperatureLimit}°C · Lạnh từ ${state.coldLimit}°C trở xuống." else "Bật Cảnh báo môi trường bên dưới để nhận thông báo vượt ngưỡng.",style=MaterialTheme.typography.bodySmall,color=TextGray,modifier=Modifier.padding(top=8.dp))

@@ -66,11 +66,19 @@ fun SystemScreen(
     }
     val modelPresent = remember { runCatching { context.assets.openFd("mobile_face_net.tflite").use { it.length > 0 } }.getOrDefault(false) }
     val sensors = state.esp32Online && state.temperature != null && state.humidity != null
+    val mq2Ready = state.esp32Online && state.hardware?.hasMq2 == true && state.hardware.smokePpm != null
+    val mq2Detail = when {
+        mq2Ready -> "Đang đo ${state.hardware?.smokePpm} ppm · ngưỡng ${state.smokeLimit} ppm"
+        state.esp32Online && state.hardware?.hasMq2 == true -> "Đã kết nối MQ-2 · đang làm nóng cảm biến"
+        else -> "Chờ gắn cảm biến MQ-2 (ngưỡng đặt sẵn ${state.smokeLimit} ppm)"
+    }
     AppPage("Thông tin hệ thống", "", "system", onNavigate, onBack) {
         item { ConnectionCard(state, onRefresh) }
         item {
             WhiteCard(Modifier.fillMaxWidth()) {
                 DiagnosticRow("Cảm biến DHT22", if(sensors) "Đã nhận nhiệt độ và độ ẩm" else "Chưa nhận đủ số đo từ ESP32", sensors)
+                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Outline)
+                DiagnosticRow("Cảm biến khói MQ-2", mq2Detail, mq2Ready)
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Outline)
                 DiagnosticRow("Quyền camera", if(camera) "Đã được cấp quyền" else "Mở Camera để cấp quyền truy cập", camera)
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Outline)

@@ -36,6 +36,9 @@ fun AutomationScreen(state: SmartHomeState, onRules: (Boolean,Boolean)->Unit,
                 HorizontalDivider(color=Outline)
                 SettingsLink("Giàn phơi khi mưa",Icons.Default.Umbrella,
                     if(state.hardware?.rainRetractEnabled==true) "Đang bật tự thu" else "Điều khiển và thiết lập tại trang Nhà") {onNavigate("home")}
+                HorizontalDivider(color=Outline)
+                SettingsLink("Phòng khói MQ-2 & Thông gió",Icons.Default.Air,
+                    if(state.smokeAlertsEnabled) "Từ ${state.smokeLimit} ppm · ${if(state.effectiveSmokeAuto) "Tự mở cửa sổ & quạt" else "Chỉ cảnh báo"}" else "Đang tắt") {onNavigate("home")}
             }
         }
         item {Text("Cửa có vật cản hoặc thiếu số đo khoảng cách sẽ chờ trước khi đóng. PIR cần thời gian ổn định sau khi cấp nguồn.",style=MaterialTheme.typography.bodySmall,color=TextGray)}

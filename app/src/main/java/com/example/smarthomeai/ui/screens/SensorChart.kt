@@ -13,11 +13,17 @@ import com.example.smarthomeai.ui.theme.*
 import kotlin.math.max
 
 @Composable
-internal fun SensorChart(samples: List<SensorSample>, temperature: Boolean) {
+internal fun SensorChart(
+    samples: List<SensorSample>,
+    temperature: Boolean,
+    valueSelector: ((SensorSample) -> Float)? = null,
+    labelName: String? = null
+) {
+    val resolvedLabel = labelName ?: if (temperature) "nhiệt độ" else "độ ẩm"
     Canvas(Modifier.fillMaxWidth().height(170.dp).padding(vertical = 16.dp).semantics {
-        contentDescription = "Biểu đồ ${if(temperature) "nhiệt độ" else "độ ẩm"}, ${samples.size} số đo. Khoảng thiếu dữ liệu không nối đường."
+        contentDescription = "Biểu đồ $resolvedLabel, ${samples.size} số đo. Khoảng thiếu dữ liệu không nối đường."
     }) {
-        val values = samples.map { if(temperature) it.temperature.toFloat() else it.humidity.toFloat() }
+        val values = samples.map { valueSelector?.invoke(it) ?: if (temperature) it.temperature.toFloat() else it.humidity.toFloat() }
         val low = values.min() - 2f
         val high = values.max() + 2f
         val span = max(1L, samples.last().timestamp - samples.first().timestamp)

@@ -25,7 +25,7 @@ fun AlertsScreen(state: SmartHomeState, onReview: (String) -> Unit, onReviewAll:
     var expandedIncident by rememberSaveable { mutableStateOf<String?>(null) }
     var showFilter by remember { mutableStateOf(false) }
     var showActivity by rememberSaveable { mutableStateOf(false) }
-    val categories = listOf(null to "Mọi loại", AlertType.STRANGER to "Người lạ", AlertType.MOTION to "Chuyển động", AlertType.DOOR to "Cửa", AlertType.ENVIRONMENT to "Môi trường")
+    val categories = listOf(null to "Mọi loại", AlertType.STRANGER to "Người lạ", AlertType.MOTION to "Chuyển động", AlertType.DOOR to "Cửa", AlertType.ENVIRONMENT to "Môi trường", AlertType.SMOKE to "Khói / Khí gas")
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(selectedAlert) {
         if (selectedAlert != null) {
@@ -77,8 +77,8 @@ fun AlertsScreen(state: SmartHomeState, onReview: (String) -> Unit, onReviewAll:
         items(alerts, key = { it.id }) { alert ->
             WhiteCard(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.Top) {
-                    Icon(when(alert.type) { AlertType.STRANGER -> Icons.Default.PersonSearch; AlertType.DOOR -> Icons.Default.MeetingRoom; AlertType.ENVIRONMENT -> Icons.Default.Thermostat; else -> Icons.Default.Sensors },
-                        null, tint = if(alert.reviewed) TextGray else OrangeWarn, modifier = Modifier.padding(top = 2.dp).size(24.dp))
+                    Icon(when(alert.type) { AlertType.STRANGER -> Icons.Default.PersonSearch; AlertType.DOOR -> Icons.Default.MeetingRoom; AlertType.ENVIRONMENT -> Icons.Default.Thermostat; AlertType.SMOKE -> Icons.Default.WarningAmber; else -> Icons.Default.Sensors },
+                        null, tint = if(alert.reviewed) TextGray else if(alert.type == AlertType.SMOKE) RedAlert else OrangeWarn, modifier = Modifier.padding(top = 2.dp).size(24.dp))
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
                         if (alert.id == selectedAlert) Text("Sự kiện từ thông báo", color = Blue600, style = MaterialTheme.typography.labelMedium)
                         Text(alert.title, style = MaterialTheme.typography.bodyMedium)

@@ -115,6 +115,14 @@ fun cloudEventTitle(type: String): String = when (type) {
     "clothes_extended" -> "Đã đưa servo giàn phơi đến vị trí phơi ra"
     "clothes_rain_retract" -> "Có mưa · giàn phơi tự thu vào"
     "clothes_rule_changed" -> "Đã đổi thiết lập tự thu khi mưa"
+    "smoke_detected" -> "Phát hiện khói vượt ngưỡng"
+    "smoke_auto_vent" -> "Có khói · tự động mở cửa sổ và bật quạt"
+    "smoke_cleared" -> "Nồng độ khói đã về mức an toàn"
+    "window_opened" -> "Đã mở cửa sổ"
+    "window_closed" -> "Đã đóng cửa sổ"
+    "fan_on" -> "Đã bật quạt thông gió"
+    "fan_off" -> "Đã tắt quạt thông gió"
+    "smoke_rule_changed" -> "Đã đổi thiết lập cảnh báo khói"
     "config_changed" -> "Đã thay đổi thời gian tự động hóa"
     else -> "Sự kiện thiết bị: $type"
 }
@@ -134,6 +142,15 @@ internal fun CloudDeviceSnapshot.effectiveHum(): Int? {
     return when {
         gw != null && tel != null -> if (tel.receivedAt > gw.receivedAt) (tel.hum ?: gw.hum) else (gw.hum ?: tel.hum)
         else -> gw?.hum ?: tel?.hum
+    }
+}
+
+internal fun CloudDeviceSnapshot.effectiveSmokePpm(): Int? {
+    val gw = gatewayState
+    val tel = latestTelemetry
+    return when {
+        gw != null && tel != null -> if (tel.receivedAt > gw.receivedAt) (tel.smokePpm ?: gw.smokePpm) else (gw.smokePpm ?: tel.smokePpm)
+        else -> gw?.smokePpm ?: tel?.smokePpm
     }
 }
 
@@ -367,6 +384,35 @@ fun CloudReadOnlySummaryCard(
                     if (gw?.monitoring == true) {
                         append(" · Đang giám sát")
                     }
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CloudStateMetric(
+                label = "Khói MQ-2",
+                value = snapshot.effectiveSmokePpm()?.let { "$it ppm" } ?: "—",
+                modifier = Modifier.weight(1f)
+            )
+            CloudStateMetric(
+                label = "Cửa sổ",
+                value = when (gw?.window) {
+                    true -> "Đang mở"
+                    false -> "Đã đóng"
+                    null -> "—"
+                },
+                modifier = Modifier.weight(1f)
+            )
+            CloudStateMetric(
+                label = "Quạt",
+                value = when (gw?.fan) {
+                    true -> "Đang bật"
+                    false -> "Đang tắt"
+                    null -> "—"
                 },
                 modifier = Modifier.weight(1f)
             )

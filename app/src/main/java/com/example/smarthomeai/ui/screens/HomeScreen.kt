@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -33,7 +34,10 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
                onMode: (HomeMode) -> Unit, onRefresh: () -> Unit, onNavigate: (String) -> Unit,
                onClothesline: (Boolean) -> Unit = {}, onRainRetraction: (Boolean) -> Unit = {},
                cloudBridge: CloudUiBridge? = rememberActiveCloudBridge(),
-               deviceBridge: CloudDeviceUiBridge? = rememberActiveCloudDeviceBridge()) {
+               deviceBridge: CloudDeviceUiBridge? = rememberActiveCloudDeviceBridge(),
+               onWindow: (Boolean) -> Unit = {},
+               onFan: (Boolean) -> Unit = {},
+               onSmokeConfig: (Boolean, Int, Boolean) -> Unit = { _, _, _ -> }) {
     val cloudSnapshot = if (deviceBridge != null) {
         deviceBridge.cloudSnapshot.collectAsState().value
     } else {
@@ -146,6 +150,12 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
                         else -> "Không có"
                     }
                 }
+                val smokePpm = if (cloudFallbackSnapshot != null) {
+                    cloudFallbackSnapshot.effectiveSmokePpm()
+                } else {
+                    state.hardware?.smokePpm
+                }
+                val smokeText = smokePpm?.let { "$it ppm" } ?: "—"
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Reading("Nhiệt độ", tempText, Modifier.weight(1f))
                     Reading("Độ ẩm", humText, Modifier.weight(1f))
@@ -153,6 +163,14 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Reading("Mưa", rainText, Modifier.weight(1f))
                     Reading("Chuyển động", motionText, Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Reading(
+                        title = "Khói MQ-2",
+                        value = smokeText,
+                        modifier = Modifier.weight(1f),
+                        valueColor = if (cloudFallbackSnapshot == null && state.smokeHazardActive) RedAlert else TextDark
+                    )
                 }
                 if (cloudFallbackSnapshot != null) {
                     val gatewayStatusText = when (cloudFallbackSnapshot.gatewayState?.online) {
@@ -185,6 +203,7 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
             WhiteCard(Modifier.fillMaxWidth()) { DeviceControlRow(state, DeviceType.LIGHT, onSetDevice) }
         }
         item { ClotheslineCard(state, onClothesline, onRainRetraction) }
+        item { SmokeVentilationCard(state, onWindow, onFan, onSmokeConfig) }
         item { AlarmControlCard(state, onSetDevice) }
 
     }
@@ -295,9 +314,9 @@ fun ClotheslineCard(state: SmartHomeState, onClothesline: (Boolean) -> Unit, onR
 }
 
 @Composable
-private fun Reading(title: String, value: String, modifier: Modifier = Modifier) {
+private fun Reading(title: String, value: String, modifier: Modifier = Modifier, valueColor: Color = TextDark) {
     Column(modifier) {
         Text(title, style = MaterialTheme.typography.bodySmall, color = TextGray)
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = valueColor)
     }
 }

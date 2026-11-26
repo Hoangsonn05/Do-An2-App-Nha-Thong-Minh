@@ -82,15 +82,17 @@ fun AppRoot(vm: SmartHomeViewModel = viewModel(), pendingAlert: String? = null,
         }
         composable("home") { HomeScreen(state, {type,on ->
             if(type == com.example.smarthomeai.data.DeviceType.DOOR && on) owner("DOOR") else vm.setDevice(type,on)
-        }, { mode -> if(state.security?.protecting == true) owner(mode.name) else vm.setMode(mode) }, vm::refresh, ::go,vm::setClothesline,vm::setRainRetraction) }
-        composable("env") { EnvironmentScreen(state,vm::refresh,::go,vm::setEnvironmentAlerts,{ nav.popBackStack() }) }
+        }, { mode -> if(state.security?.protecting == true) owner(mode.name) else vm.setMode(mode) }, vm::refresh, ::go,vm::setClothesline,vm::setRainRetraction,
+            onWindow = vm::setWindow, onFan = vm::setFan, onSmokeConfig = vm::setSmokeConfig) }
+        composable("env") { EnvironmentScreen(state,vm::refresh,::go,vm::setEnvironmentAlerts,{ nav.popBackStack() }, onSmokeConfig = vm::setSmokeConfig) }
         composable("system") { SystemScreen(state,vm.firebaseConfigured,vm::refresh,{ nav.popBackStack() },::go) }
         composable("camera") { CameraScreen(state,vm::onFaceRecognized,{ go("register") },::go,vm::openDoorForFace,vm::verifyLiveFace) }
         composable("register") { FaceRegisterScreen({ nav.popBackStack() },vm::registerFace) }
         composable("alerts") { AlertsScreen(state,vm::reviewAlert,vm::reviewAll,::go,selectedAlert) }
         composable("settings") { SettingsScreen(state,vm::setEsp32Ip,vm::setAutoAlarm,vm::setNotify,vm::removeFace,
             { vm.logout(); nav.navigate("login") { popUpTo(nav.graph.id) { inclusive = true } } },
-            vm::refresh,{ nav.popBackStack() },::go,vm::setConnection,vm::setEnvironmentAlerts, { vm.setRules(false, it) }) }
+            vm::refresh,{ nav.popBackStack() },::go,vm::setConnection,vm::setEnvironmentAlerts, { vm.setRules(false, it) },
+            onSmokeConfig = vm::setSmokeConfig) }
     }
     }
 }
