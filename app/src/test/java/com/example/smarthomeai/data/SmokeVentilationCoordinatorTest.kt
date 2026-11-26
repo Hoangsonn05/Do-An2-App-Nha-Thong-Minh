@@ -233,4 +233,60 @@ class SmokeVentilationCoordinatorTest {
         coordinator.reset()
         assertFalse(coordinator.hasEventAlertInCurrentEpisode)
     }
+
+    @Test
+    fun disablesPhoneAlertWhenSmokeAlertsDisabledButStillRunsAutoVentilation() {
+        val coordinator = SmokeVentilationCoordinator()
+        val hw = makeHardware(smokePpm = 350, windowOpen = false, fanOn = false)
+        val state = makeState(alertsEnabled = false, smokeAutoVentilation = true, hardware = hw)
+
+        val plan = coordinator.onSensorUpdated(state, hw, elapsedMs = 1_000L)
+        assertNull(plan.alertTitle)
+        assertTrue(plan.openWindow)
+        assertTrue(plan.turnOnFan)
+    }
+
+    @Test
+    fun smokeAlertFlagWithoutPpmTriggersOnceAndRearmsWhenFlagClears() {
+        val coordinator = SmokeVentilationCoordinator()
+        val hwFlag = makeHardware(smokePpm = null, smokeAlert = true, windowOpen = false, fanOn = false)
+        val state = makeState(hardware = hwFlag)
+
+        val first = coordinator.onSensorUpdated(state, hwFlag, elapsedMs = 1_000L)
+        assertNotNull(first.alertTitle)
+        assertTrue(first.openWindow)
+        assertTrue(first.turnOnFan)
+
+        val second = coordinator.onSensorUpdated(state, hwFlag, elapsedMs = 2_000L)
+        assertNull(second.alertTitle)
+
+        val hwCleared = makeHardware(smokePpm = null, smokeAlert = false, windowOpen = true, fanOn = true)
+        assertNull(coordinator.onSensorUpdated(makeState(hardware = hwCleared), hwCleared, elapsedMs = 3_000L).alertTitle)
+
+        val third = coordinator.onSensorUpdated(state, hwFlag, elapsedMs = 7_000L)
+        assertNotNull(third.alertTitle)
+    }
+
+    @Test
+    fun disablesAutoVentilationAllowsManualCloseDuringSmokeHazardAndNeverAutoClosesOnClear() {
+        val coordinator = SmokeVentilationCoordinator()
+        val hwHazard = makeHardware(smokePpm = 340, smokeAlert = true, windowOpen = true, fanOn = true, smokeAutoEnabled = false)
+        val state = makeState(smokeAutoVentilation = false, hardware = hwHazard)
+
+        val hazardPlan = coordinator.onSensorUpdated(state, hwHazard, elapsedMs = 1_000L)
+        assertNotNull(hazardPlan.alertTitle)
+        assertFalse(hazardPlan.alertTitle!!.contains("Tự động mở"))
+        assertFalse(hazardPlan.openWindow)
+        assertFalse(hazardPlan.turnOnFan)
+
+        assertEquals(ManualVentilationDecision.Allowed, coordinator.evaluateWindowCommand(state, targetOpen = false))
+        assertEquals(ManualVentilationDecision.Allowed, coordinator.evaluateFanCommand(state, targetOn = false))
+
+        // Dropping below threshold never emits auto-close/off commands
+        val hwClear = makeHardware(smokePpm = 120, smokeAlert = false, windowOpen = true, fanOn = true, smokeAutoEnabled = true)
+        val clearPlan = coordinator.onSensorUpdated(makeState(smokeAutoVentilation = true, hardware = hwClear), hwClear, elapsedMs = 2_000L)
+        assertNull(clearPlan.alertTitle)
+        assertFalse(clearPlan.openWindow)
+        assertFalse(clearPlan.turnOnFan)
+    }
 }
