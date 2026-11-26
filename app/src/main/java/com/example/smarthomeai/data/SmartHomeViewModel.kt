@@ -98,6 +98,7 @@ class SmartHomeViewModel internal constructor(
     private var lastProximityAlert = 0L
     private var overdueHandled = false
     private var environmentGate = EnvironmentEvents()
+    private val smokeCoordinator = SmokeVentilationCoordinator()
     private var clockSyncedBoot = ""
     private val faceAccess = com.example.smarthomeai.face.FaceAccessSession()
 
@@ -192,14 +193,47 @@ class SmartHomeViewModel internal constructor(
         val data = Esp32Client.readSensor(s.esp32Ip,s.deviceKey)
         if(data == null) _state.update { it.copy(esp32Online=false,connectionMessage=Esp32Client.lastError ?: "Không nhận được dữ liệu ESP32.") }
         else {
-            applySensor(data)
+            val autoPlan = applySensor(data)
             data.security?.let { security ->
                 val boot = "${security.stream}:${security.boot}"
                 if(!data.clockReady && clockSyncedBoot != boot && Esp32Client.syncClock(s.esp32Ip,s.deviceKey)) clockSyncedBoot = boot
                 syncEventsLocked(security)
             }
+            if (autoPlan.alertTitle != null && !smokeCoordinator.hasEventAlertInCurrentEpisode) {
+                addAlert(AlertType.SMOKE, autoPlan.alertTitle)
+            }
+            if (autoPlan.hasCommands) {
+                return executeAutoVentilationLocked(autoPlan) ?: data
+            }
         }
         return data
+    }
+    private fun executeAutoVentilationLocked(plan: AutoVentilationPlan): SensorData? {
+        val s = _state.value
+        val windowSent = if (plan.openWindow) Esp32Client.sendWindow(s.esp32Ip, true, s.deviceKey) else false
+        val fanSent = if (plan.turnOnFan) Esp32Client.sendFan(s.esp32Ip, true, s.deviceKey) else false
+        val lastErr = Esp32Client.lastError
+        val refreshed = Esp32Client.readSensor(s.esp32Ip, s.deviceKey)
+        val actionTitle = when {
+            plan.openWindow && plan.turnOnFan -> "Có khói vượt ngưỡng · Tự động mở cửa sổ và bật quạt"
+            plan.openWindow -> "Có khói vượt ngưỡng · Tự động mở cửa sổ"
+            else -> "Có khói vượt ngưỡng · Tự động bật quạt"
+        }
+        val anySent = windowSent || fanSent
+        val statusMsg = if (anySent) actionTitle else lastErr ?: "Chưa gửi được lệnh thông gió tự động."
+        _state.update { current ->
+            current.copy(
+                light = refreshed?.light ?: current.light,
+                doorOpen = refreshed?.door ?: current.doorOpen,
+                alarm = refreshed?.alarm ?: current.alarm,
+                security = refreshed?.security ?: current.security,
+                hardware = refreshed?.hardware ?: current.hardware,
+                lastSeen = if (refreshed != null) System.currentTimeMillis() else current.lastSeen,
+                ventilationMessage = statusMsg,
+                logs = if (anySent) (listOf(LogItem("smoke", actionTitle, nowString())) + current.logs).take(200) else current.logs
+            )
+        }
+        return refreshed
     }
     private fun syncEventsLocked(security: SecurityStatus) {
         val s = _state.value
@@ -210,33 +244,52 @@ class SmartHomeViewModel internal constructor(
         }
         val fresh = batch.events.filter { it.seq > cursor && s.deviceEvents.none { old -> old.id == it.id } }
         val events = mergeDeviceEvents(s.deviceEvents, fresh)
+        val mergedAutoVentIds = fresh.filter { event ->
+            event.kind == "smoke_auto_vent" &&
+                fresh.any { prev -> prev.kind == "smoke_detected" && prev.boot == event.boot && prev.seq + 1 == event.seq }
+        }.map { it.id }.toSet()
         val eventAlerts = fresh.mapNotNull { event ->
+            if (event.id in mergedAutoVentIds) return@mapNotNull null
             val type = when (event.kind) {
                 "motion_home", "motion_waiting" -> AlertType.MOTION
                 "rain_started", "rain_cleared" -> AlertType.ENVIRONMENT
                 "servo_overdue", "servo_blocked", "exit_waiting" -> AlertType.DOOR
+                "smoke_detected", "smoke_auto_vent", "smoke_cleared" -> AlertType.SMOKE
                 else -> return@mapNotNull null
             }
             val title = when (event.kind) {
                 "rain_started" -> if (fresh.any { it.kind == "clothes_rain_retract" && it.boot == event.boot &&
                     it.seq == event.seq + 1 }) "Trời bắt đầu mưa · Giàn phơi đã thu vào" else "Trời bắt đầu mưa"
                 "rain_cleared" -> "Trời đã tạnh mưa"
+                "smoke_detected" -> if (fresh.any { it.kind == "smoke_auto_vent" && it.boot == event.boot &&
+                    it.seq == event.seq + 1 }) "Phát hiện khói vượt ngưỡng · Đã mở cửa sổ và bật quạt" else event.title
+                "smoke_cleared" -> "Nồng độ khói đã về mức an toàn"
                 else -> event.title
             }
             AlertItem(type, title, event.timeLabel, id = event.id, timestamp = event.timestamp)
         }
+        smokeCoordinator.onSmokeEventsSynced(fresh.map { it.kind })
         _state.update {
             val incidents = mergeIncidentAlerts(it.alerts, fresh, events)
             it.copy(deviceEvents = events,
                 alerts = (eventAlerts.asReversed() + incidents).distinctBy { alert -> alert.id }.take(100),
                 eventStream = batch.stream, eventCursor = batch.next - 1,
                 syncMessage = if (cursor < batch.oldest - 1) "ESP32 chỉ giữ 64 sự kiện gần nhất; một phần lịch sử cũ không còn trên thiết bị." else null,
-                logs = (fresh.asReversed().map { e -> LogItem(if (e.kind.startsWith("motion_")) "motion" else "esp32", e.title, e.timeLabel) } + it.logs).take(200))
+                logs = (fresh.asReversed().map { e ->
+                    val logKind = when {
+                        e.kind.startsWith("motion_") -> "motion"
+                        e.kind.startsWith("smoke_") || e.kind.startsWith("window_") || e.kind.startsWith("fan_") -> "smoke"
+                        else -> "esp32"
+                    }
+                    LogItem(logKind, e.title, e.timeLabel)
+                } + it.logs).take(200))
         }
         if (fresh.isNotEmpty()) cleanupEvidence()
         if (_state.value.notifyEnabled) {
             val currentIds = fresh.filter { it.boot == security.boot }.map { it.id }.toSet()
-            eventAlerts.filter { it.id in currentIds }.forEach(::notifyAlert)
+            eventAlerts.filter {
+                it.id in currentIds && (it.type != AlertType.SMOKE || _state.value.smokeAlertsEnabled)
+            }.forEach(::notifyAlert)
             val incidentKeys = fresh.filter {
                 it.boot == security.boot && it.kind in setOf("motion_alarm", "proximity_alarm", "motion_entry", "alarm_silent")
             }.mapNotNull { it.incidentKey }.distinct()
@@ -315,6 +368,135 @@ class SmartHomeViewModel internal constructor(
     }
     fun setClothesline(retracted: Boolean) = updateClothesline(retracted,null)
     fun setRainRetraction(enabled: Boolean) = updateClothesline(null,enabled)
+    fun setWindow(open: Boolean) {
+        val s = _state.value
+        if (!_loggedIn.value || !s.esp32Online || s.ventilationBusy || s.modeBusy || s.alarmSettingsBusy) return
+        when (val decision = smokeCoordinator.evaluateWindowCommand(s, open)) {
+            is ManualVentilationDecision.Rejected -> {
+                _state.update { it.copy(ventilationMessage = decision.reason) }
+                return
+            }
+            ManualVentilationDecision.Allowed -> Unit
+        }
+        _state.update { it.copy(ventilationBusy = true, ventilationMessage = "Đang chờ ESP32 xác nhận…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            network.withLock {
+                try {
+                    if (!_loggedIn.value) return@withLock
+                    val current = _state.value
+                    when (val recheck = smokeCoordinator.evaluateWindowCommand(current, open)) {
+                        is ManualVentilationDecision.Rejected -> {
+                            _state.update { it.copy(ventilationMessage = recheck.reason) }
+                            return@withLock
+                        }
+                        ManualVentilationDecision.Allowed -> Unit
+                    }
+                    val accepted = Esp32Client.sendWindow(current.esp32Ip, open, current.deviceKey)
+                    val error = Esp32Client.lastError
+                    val hardware = refreshLocked()?.hardware
+                    val ok = accepted && hardware?.windowOpen == open
+                    val message = if (ok) {
+                        "ESP32 đã xác nhận ${if (open) "mở cửa sổ" else "đóng cửa sổ"}."
+                    } else {
+                        error ?: "Chưa xác nhận được trạng thái cửa sổ. Kiểm tra kết nối rồi thử lại."
+                    }
+                    _state.update {
+                        it.copy(
+                            ventilationMessage = message,
+                            logs = if (ok) (listOf(LogItem("smoke", if (open) "Đã mở cửa sổ" else "Đã đóng cửa sổ", nowString())) + it.logs).take(200) else it.logs
+                        )
+                    }
+                } finally {
+                    _state.update { it.copy(ventilationBusy = false) }
+                }
+            }
+        }
+    }
+    fun setFan(on: Boolean) {
+        val s = _state.value
+        if (!_loggedIn.value || !s.esp32Online || s.ventilationBusy || s.modeBusy || s.alarmSettingsBusy) return
+        when (val decision = smokeCoordinator.evaluateFanCommand(s, on)) {
+            is ManualVentilationDecision.Rejected -> {
+                _state.update { it.copy(ventilationMessage = decision.reason) }
+                return
+            }
+            ManualVentilationDecision.Allowed -> Unit
+        }
+        _state.update { it.copy(ventilationBusy = true, ventilationMessage = "Đang chờ ESP32 xác nhận…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            network.withLock {
+                try {
+                    if (!_loggedIn.value) return@withLock
+                    val current = _state.value
+                    when (val recheck = smokeCoordinator.evaluateFanCommand(current, on)) {
+                        is ManualVentilationDecision.Rejected -> {
+                            _state.update { it.copy(ventilationMessage = recheck.reason) }
+                            return@withLock
+                        }
+                        ManualVentilationDecision.Allowed -> Unit
+                    }
+                    val accepted = Esp32Client.sendFan(current.esp32Ip, on, current.deviceKey)
+                    val error = Esp32Client.lastError
+                    val hardware = refreshLocked()?.hardware
+                    val ok = accepted && hardware?.fanOn == on
+                    val message = if (ok) {
+                        "ESP32 đã xác nhận ${if (on) "bật quạt thông gió" else "tắt quạt thông gió"}."
+                    } else {
+                        error ?: "Chưa xác nhận được trạng thái quạt. Kiểm tra kết nối rồi thử lại."
+                    }
+                    _state.update {
+                        it.copy(
+                            ventilationMessage = message,
+                            logs = if (ok) (listOf(LogItem("smoke", if (on) "Đã bật quạt thông gió" else "Đã tắt quạt thông gió", nowString())) + it.logs).take(200) else it.logs
+                        )
+                    }
+                } finally {
+                    _state.update { it.copy(ventilationBusy = false) }
+                }
+            }
+        }
+    }
+    fun setSmokeConfig(alertsEnabled: Boolean, thresholdPpm: Int, autoVentilation: Boolean) {
+        val cleanLimit = thresholdPpm.coerceIn(MIN_SMOKE_LIMIT_PPM, MAX_SMOKE_LIMIT_PPM)
+        _state.update {
+            it.copy(
+                smokeAlertsEnabled = alertsEnabled,
+                smokeLimit = cleanLimit,
+                smokeAutoVentilation = autoVentilation
+            )
+        }
+        val s = _state.value
+        if (!_loggedIn.value || !s.esp32Online || s.hardware?.smokeAutoEnabled == null) return
+        if (s.ventilationBusy || s.modeBusy || s.alarmSettingsBusy) return
+        _state.update { it.copy(ventilationBusy = true, ventilationMessage = "Đang lưu cấu hình cảnh báo khói…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            network.withLock {
+                try {
+                    if (!_loggedIn.value) return@withLock
+                    val current = _state.value
+                    val accepted = Esp32Client.sendSmokeConfig(current.esp32Ip, autoVentilation, cleanLimit, current.deviceKey)
+                    val error = Esp32Client.lastError
+                    val reported = refreshLocked()?.hardware
+                    val ok = accepted &&
+                        reported?.smokeAutoEnabled == autoVentilation &&
+                        reported.smokeThresholdPpm == cleanLimit
+                    val message = if (ok) {
+                        "ESP32 đã lưu cấu hình cảnh báo khói (${cleanLimit} ppm)."
+                    } else {
+                        error ?: "Đã lưu trên ứng dụng; chưa xác nhận được cấu hình khói với ESP32."
+                    }
+                    _state.update {
+                        it.copy(
+                            ventilationMessage = message,
+                            logs = if (ok) (listOf(LogItem("smoke", "Đã đổi thiết lập cảnh báo khói (${cleanLimit} ppm)", nowString())) + it.logs).take(200) else it.logs
+                        )
+                    }
+                } finally {
+                    _state.update { it.copy(ventilationBusy = false) }
+                }
+            }
+        }
+    }
     fun setAlarmSettings(settings: AlarmSettings) {
         val current = _state.value
         if(!_loggedIn.value || !current.esp32Online || current.hardware?.alarmSettings == null ||
@@ -380,11 +562,12 @@ class SmartHomeViewModel internal constructor(
             } finally { _state.update { it.copy(ruleBusy=false) } }
         } }
     }
-    private fun applySensor(d: SensorData) {
+    private fun applySensor(d: SensorData): AutoVentilationPlan {
         val now = System.currentTimeMillis()
         val previous = _state.value
         val motionStarted = d.motion && !previous.motionDetected
-        val sample = if(d.temp != null && d.hum != null && now - lastSample >= 60_000) SensorSample(now, d.temp, d.hum) else null
+        val smokePpm = d.hardware?.smokePpm
+        val sample = if(d.temp != null && d.hum != null && now - lastSample >= 60_000) SensorSample(now, d.temp, d.hum, smokePpm) else null
         if(sample != null) { storage.recordSample(sample); lastSample = now }
         _state.update {
             it.copy(temperature = d.temp, humidity = d.hum, motionDetected = d.motion,
@@ -396,7 +579,7 @@ class SmartHomeViewModel internal constructor(
                 faceDoorMessage=if(previous.doorOpen && d.door==false) null else it.faceDoorMessage,
                 mode = d.security?.mode ?: it.mode, monitoring = d.security?.protecting ?: it.monitoring,
                 samples = if(sample == null) it.samples else (it.samples + sample).filter { p -> now - p.timestamp <= HISTORY_WINDOW },
-                liveSamples=if(d.temp!=null && d.hum!=null) (it.liveSamples+SensorSample(now,d.temp,d.hum)).filter {p->now-p.timestamp<=60_000}.takeLast(60) else it.liveSamples,
+                liveSamples=if(d.temp!=null && d.hum!=null) (it.liveSamples+SensorSample(now,d.temp,d.hum,smokePpm)).filter {p->now-p.timestamp<=60_000}.takeLast(60) else it.liveSamples,
                 logs = if(motionStarted && d.security?.demoModes != true) (listOf(LogItem("motion", "Phát hiện chuyển động", nowString())) + it.logs).take(200) else it.logs)
         }
         if (d.security?.demoModes != true && motionStarted &&
@@ -419,6 +602,7 @@ class SmartHomeViewModel internal constructor(
         val config = _state.value
         environmentGate.evaluate(config.environmentAlerts, d.temp, d.hum, config.temperatureLimit,
             config.coldLimit, config.humidityLimit).forEach { addAlert(AlertType.ENVIRONMENT, it) }
+        return smokeCoordinator.onSensorUpdated(config, d.hardware, elapsed)
     }
     private fun addAlert(type: AlertType, title: String, imagePath: String? = null, sendNotification: Boolean = true) {
         val alert = AlertItem(type, title, nowString(), imagePath = imagePath)
@@ -470,11 +654,14 @@ class SmartHomeViewModel internal constructor(
     fun setConnection(ip: String, key: String) {
         verifyLiveFace(null)
         if(!Esp32Client.validIp(ip) || (key.isNotEmpty() && !Esp32Client.validKey(key))) return
-        if(_state.value.modeBusy || _state.value.ruleBusy || _state.value.clothesBusy || _state.value.alarmSettingsBusy || _state.value.commands.values.any { it.phase == CommandPhase.SENDING }) return
+        if(_state.value.modeBusy || _state.value.ruleBusy || _state.value.clothesBusy || _state.value.ventilationBusy || _state.value.alarmSettingsBusy || _state.value.commands.values.any { it.phase == CommandPhase.SENDING }) return
         viewModelScope.launch(Dispatchers.IO) { network.withLock {
-            if (_state.value.esp32Ip != ip) environmentGate = EnvironmentEvents()
+            if (_state.value.esp32Ip != ip) {
+                environmentGate = EnvironmentEvents()
+                smokeCoordinator.reset()
+            }
             _state.update { it.copy(esp32Ip=ip,deviceKey=key,esp32Online=false,lastSeen=0,temperature=null,humidity=null,
-                security=null,hardware=null,rulesSupported=false,commands=emptyMap(),connectionMessage=null,syncMessage=null,faceDoorMessage=null,clothesMessage=null,alarmSettingsMessage=null,liveSamples=emptyList()) }
+                security=null,hardware=null,rulesSupported=false,commands=emptyMap(),connectionMessage=null,syncMessage=null,faceDoorMessage=null,clothesMessage=null,alarmSettingsMessage=null,ventilationMessage=null,liveSamples=emptyList()) }
             if(_loggedIn.value) refreshLocked()
         } }
     }
