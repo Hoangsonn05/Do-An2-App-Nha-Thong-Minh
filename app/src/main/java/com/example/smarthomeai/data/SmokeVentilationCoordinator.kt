@@ -33,9 +33,13 @@ class SmokeVentilationCoordinator {
     private var hasAutoDispatched: Boolean = false
     private var eventAlertedInCurrentEpisode: Boolean = false
     private var flagAlertedInCurrentEpisode: Boolean = false
+    private var sensorAlertEmittedInCurrentEpisode: Boolean = false
 
     val hasEventAlertInCurrentEpisode: Boolean
         get() = eventAlertedInCurrentEpisode
+
+    val hasSensorAlertInCurrentEpisode: Boolean
+        get() = sensorAlertEmittedInCurrentEpisode
 
     fun onSensorUpdated(
         state: SmartHomeState,
@@ -50,12 +54,14 @@ class SmokeVentilationCoordinator {
         if (!flagHazard && ppm != null && ppm < rearmThreshold) {
             eventAlertedInCurrentEpisode = false
             flagAlertedInCurrentEpisode = false
+            sensorAlertEmittedInCurrentEpisode = false
             hasAutoDispatched = false
             lastAutoDispatchMs = 0L
         } else if (!flagHazard && ppm == null && incomingHardware?.smokeAlert == false) {
             flagAlertedInCurrentEpisode = false
             if (!safetyGate.isActive) {
                 eventAlertedInCurrentEpisode = false
+                sensorAlertEmittedInCurrentEpisode = false
                 hasAutoDispatched = false
                 lastAutoDispatchMs = 0L
             }
@@ -96,8 +102,8 @@ class SmokeVentilationCoordinator {
             return AutoVentilationPlan(alertTitle = alertTitle)
         }
 
-        val needsWindowOpen = incomingHardware?.hasWindow == true && incomingHardware.windowOpen == false
-        val needsFanOn = incomingHardware?.hasFan == true && incomingHardware.fanOn == false
+        val needsWindowOpen = incomingHardware?.hasWindow == true && incomingHardware.windowOpen != true
+        val needsFanOn = incomingHardware?.hasFan == true && incomingHardware.fanOn != true
         val cooldownReady = !hasAutoDispatched || (elapsedMs - lastAutoDispatchMs >= AUTO_DISPATCH_COOLDOWN_MS)
 
         val shouldOpenWindow = needsWindowOpen && cooldownReady
@@ -120,6 +126,13 @@ class SmokeVentilationCoordinator {
             eventAlertedInCurrentEpisode = true
         }
     }
+
+    fun onSensorAlertEmitted() {
+        sensorAlertEmittedInCurrentEpisode = true
+    }
+
+    fun shouldSuppressSmokeHazardEventAlert(kind: String): Boolean =
+        (kind == "smoke_detected" || kind == "smoke_auto_vent") && sensorAlertEmittedInCurrentEpisode
 
     fun evaluateWindowCommand(state: SmartHomeState, targetOpen: Boolean): ManualVentilationDecision {
         val hw = state.hardware
@@ -161,5 +174,6 @@ class SmokeVentilationCoordinator {
         hasAutoDispatched = false
         eventAlertedInCurrentEpisode = false
         flagAlertedInCurrentEpisode = false
+        sensorAlertEmittedInCurrentEpisode = false
     }
 }

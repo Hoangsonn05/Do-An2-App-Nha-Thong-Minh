@@ -289,4 +289,35 @@ class SmokeVentilationCoordinatorTest {
         assertFalse(clearPlan.openWindow)
         assertFalse(clearPlan.turnOnFan)
     }
+
+    @Test
+    fun unknownWindowAndFanStateDuringHazardStillDispatchesAutoVentilation() {
+        val coordinator = SmokeVentilationCoordinator()
+        val hw = makeHardware(smokePpm = 340, windowOpen = null, fanOn = null)
+        val plan = coordinator.onSensorUpdated(makeState(hardware = hw), hw, elapsedMs = 1_000L)
+
+        assertNotNull(plan.alertTitle)
+        assertTrue(plan.openWindow)
+        assertTrue(plan.turnOnFan)
+        assertTrue(plan.hasCommands)
+    }
+
+    @Test
+    fun preventsDuplicateEventAlertWhenSensorAlreadyEmittedInCurrentEpisodeAndRearmsOnClear() {
+        val coordinator = SmokeVentilationCoordinator()
+        val hwHazard = makeHardware(smokePpm = 340, windowOpen = true, fanOn = true)
+        val plan = coordinator.onSensorUpdated(makeState(hardware = hwHazard), hwHazard, elapsedMs = 1_000L)
+
+        assertNotNull(plan.alertTitle)
+        coordinator.onSensorAlertEmitted()
+        assertTrue(coordinator.hasSensorAlertInCurrentEpisode)
+        assertTrue(coordinator.shouldSuppressSmokeHazardEventAlert("smoke_detected"))
+        assertTrue(coordinator.shouldSuppressSmokeHazardEventAlert("smoke_auto_vent"))
+        assertFalse(coordinator.shouldSuppressSmokeHazardEventAlert("smoke_cleared"))
+
+        val hwClear = makeHardware(smokePpm = 240, smokeAlert = false, windowOpen = true, fanOn = true)
+        assertNull(coordinator.onSensorUpdated(makeState(hardware = hwClear), hwClear, elapsedMs = 2_000L).alertTitle)
+        assertFalse(coordinator.hasSensorAlertInCurrentEpisode)
+        assertFalse(coordinator.shouldSuppressSmokeHazardEventAlert("smoke_detected"))
+    }
 }

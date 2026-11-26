@@ -200,6 +200,7 @@ class SmartHomeViewModel internal constructor(
                 syncEventsLocked(security)
             }
             if (autoPlan.alertTitle != null && !smokeCoordinator.hasEventAlertInCurrentEpisode) {
+                smokeCoordinator.onSensorAlertEmitted()
                 addAlert(AlertType.SMOKE, autoPlan.alertTitle)
             }
             if (autoPlan.hasCommands) {
@@ -250,6 +251,7 @@ class SmartHomeViewModel internal constructor(
         }.map { it.id }.toSet()
         val eventAlerts = fresh.mapNotNull { event ->
             if (event.id in mergedAutoVentIds) return@mapNotNull null
+            if (smokeCoordinator.shouldSuppressSmokeHazardEventAlert(event.kind)) return@mapNotNull null
             val type = when (event.kind) {
                 "motion_home", "motion_waiting" -> AlertType.MOTION
                 "rain_started", "rain_cleared" -> AlertType.ENVIRONMENT
