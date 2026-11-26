@@ -269,6 +269,109 @@ private:
 // ===== END CONTROL LOGIC =====
 
 
+// ===== BEGIN MQ2 VENTILATION =====
+// MQ-2 (GPIO34, ADC1) + servo cua so (GPIO21) + quat (GPIO22).
+// AO 5V -> cau phan ap 10k (tren) / 20k (duoi) -> GPIO34.
+// Servo cua so dung nguon 5V ngoai, GND chung.
+constexpr int MQ2_PIN = 34;
+constexpr int WINDOW_SERVO_PIN = 21;
+constexpr int FAN_PIN = 22;
+constexpr bool FAN_ACTIVE_HIGH = true;
+
+constexpr int WINDOW_CLOSED_ANGLE = 0;
+constexpr int WINDOW_OPEN_ANGLE = 90;
+
+constexpr uint32_t MQ2_PREHEAT_MS = 60000;
+constexpr uint32_t MQ2_SAMPLE_MS = 200;
+constexpr float MQ2_VCC = 5.0f;
+constexpr float MQ2_RL_KOHM = 5.0f;
+// R0 PHAI hieu chuan ngoai troi sach (Rs trong khong khi sach / ~9.8).
+constexpr float MQ2_R0_KOHM = 10.0f;
+// UOC LUONG tu datasheet (ppm = A * (Rs/R0)^B), can hieu chinh theo module.
+constexpr float MQ2_CURVE_A = 3616.1f;
+constexpr float MQ2_CURVE_B = -2.675f;
+
+constexpr int SMOKE_DEFAULT_PPM = 300;
+constexpr int SMOKE_MIN_PPM = 50;
+constexpr int SMOKE_MAX_PPM = 5000;
+constexpr int SMOKE_HYST_PPM = 50;
+constexpr int SMOKE_CONFIRM_SAMPLES = 3;
+constexpr uint32_t SMOKE_CLEAR_MS = 5000;
+
+// Logic thuan, khong cham phan cung. update() goi moi mau; tra ve true khi co canh.
+class SmokeVentController {
+public:
+  bool autoEnabled = true;
+  int thresholdPpm = SMOKE_DEFAULT_PPM;
+  bool alert = false;
+  bool justDetected = false;
+  bool justCleared = false;
+
+  bool update(int ppm, bool preheatDone, uint32_t now) {
+    justDetected = false;
+    justCleared = false;
+
+    if (!preheatDone) {
+      alert = false;
+      confirm = 0;
+      clearing = false;
+      return false;
+    }
+
+    if (ppm < 0) {  // mau loi: giu trang thai, khong dem them
+      confirm = 0;
+      clearing = false;
+      return false;
+    }
+
+    if (!alert) {
+      confirm = ppm >= thresholdPpm ? confirm + 1 : 0;
+      if (confirm >= SMOKE_CONFIRM_SAMPLES) {
+        alert = true;
+        justDetected = true;
+        confirm = 0;
+        clearing = false;
+      }
+    } else {
+      int clearBelow = thresholdPpm - SMOKE_HYST_PPM;
+      if (clearBelow < 1) clearBelow = 1;
+      if (ppm < clearBelow) {
+        if (!clearing) {
+          clearing = true;
+          clearSince = now;
+        } else if (now - clearSince >= SMOKE_CLEAR_MS) {
+          alert = false;
+          justCleared = true;
+          clearing = false;
+        }
+      } else {
+        clearing = false;
+      }
+    }
+
+    return justDetected || justCleared;
+  }
+
+private:
+  int confirm = 0;
+  bool clearing = false;
+  uint32_t clearSince = 0;
+};
+
+// kind[24] => toi da 23 ky tu.
+#define VENT_KIND_FITS(s) static_assert(sizeof(s) <= 24, "kind > 23")
+VENT_KIND_FITS("smoke_detected");
+VENT_KIND_FITS("smoke_auto_vent");
+VENT_KIND_FITS("smoke_cleared");
+VENT_KIND_FITS("window_opened");
+VENT_KIND_FITS("window_closed");
+VENT_KIND_FITS("fan_on");
+VENT_KIND_FITS("fan_off");
+VENT_KIND_FITS("smoke_rule_changed");
+
+// ===== END MQ2 VENTILATION =====
+
+
 // ===== WIFI, CAM BIEN, API VA NHAT KY =====
 
 WebServer server(80);
@@ -682,6 +785,197 @@ void saveConfig() {
 }
 
 
+// ===== BEGIN MQ2 VENTILATION RUNTIME =====
+
+Servo windowServo;
+bool windowOpen = false;
+bool fanOn = false;
+int smokePpm = -1;
+SmokeVentController smoke;
+
+int lastWindowServo = -1;
+int lastFanOut = -1;
+
+uint32_t lastSmokeSample = 0;
+uint32_t lastSmokeValid = 0;
+
+// Giong recordEvent nhung incident = 0; bo qua cung loai lap trong 1 giay.
+void recordVentEvent(const char* kind) {
+  static char lastKind[24] = "";
+  static uint32_t lastAt = 0;
+  const uint32_t now = millis();
+
+  if (lastKind[0] && strcmp(lastKind, kind) == 0 && now - lastAt < 1000) return;
+
+  strlcpy(lastKind, kind, sizeof(lastKind));
+  lastAt = now;
+
+  Event event{};
+  event.seq = journal.next++;
+  event.epoch = clockReady() ? (int64_t)time(nullptr) * 1000 : 0;
+  event.uptime = now;
+  event.boot = journal.boot;
+  event.incident = 0;
+  strlcpy(event.kind, kind, sizeof(event.kind));
+
+  journal.events[(event.seq - 1) % 64] = event;
+  settings.putBytes("journal3", &journal, sizeof(journal));
+}
+
+void ventOutputs() {
+  const int windowPos = windowOpen ? WINDOW_OPEN_ANGLE : WINDOW_CLOSED_ANGLE;
+  if (windowPos != lastWindowServo) {
+    windowServo.write(windowPos);
+    lastWindowServo = windowPos;
+  }
+
+  const int fanOut = fanOn ? 1 : 0;
+  if (fanOut != lastFanOut) {
+    digitalWrite(FAN_PIN, (fanOn == FAN_ACTIVE_HIGH) ? HIGH : LOW);
+    lastFanOut = fanOut;
+  }
+}
+
+void setWindowOpen(bool value) {
+  if (windowOpen == value) return;
+  windowOpen = value;
+  recordVentEvent(value ? "window_opened" : "window_closed");
+}
+
+void setFanOn(bool value) {
+  if (fanOn == value) return;
+  fanOn = value;
+  recordVentEvent(value ? "fan_on" : "fan_off");
+}
+
+// Doc MQ-2 khong chan: moi MQ2_SAMPLE_MS, trung binh 16 mau.
+int readSmokePpm(uint32_t now) {
+  if (now < MQ2_PREHEAT_MS) return -1;
+
+  uint32_t sum = 0;
+  for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(MQ2_PIN);
+  const float mv = sum / 16.0f;
+
+  if (mv <= 0.0f || mv >= 3300.0f) return -2;  // mau loi
+
+  const float vout = mv * 1.5f / 1000.0f;  // cau phan ap 10k/20k
+  if (vout >= MQ2_VCC) return -2;
+
+  const float rs = MQ2_RL_KOHM * (MQ2_VCC - vout) / vout;
+  float ppm = MQ2_CURVE_A * powf(rs / MQ2_R0_KOHM, MQ2_CURVE_B);
+  if (!(ppm >= 0.0f)) return -2;
+  if (ppm > 10000.0f) ppm = 10000.0f;
+  return (int)ppm;
+}
+
+void smokeVentTick() {
+  const uint32_t now = millis();
+  if (now - lastSmokeSample < MQ2_SAMPLE_MS) return;
+  lastSmokeSample = now;
+
+  const bool preheatDone = now >= MQ2_PREHEAT_MS;
+  const int reading = readSmokePpm(now);
+
+  if (reading >= 0) {
+    smokePpm = reading;
+    lastSmokeValid = now;
+  } else if (!preheatDone || now - lastSmokeValid > 2000) {
+    smokePpm = -1;
+  }
+
+  smoke.update(smokePpm, preheatDone, now);
+
+  if (smoke.justDetected) {
+    recordVentEvent("smoke_detected");
+    if (smoke.autoEnabled) {
+      windowOpen = true;
+      fanOn = true;
+      recordVentEvent("smoke_auto_vent");
+      if (lastWindowServo != WINDOW_OPEN_ANGLE) recordVentEvent("window_opened");
+      if (lastFanOut != 1) recordVentEvent("fan_on");
+    }
+  }
+
+  if (smoke.justCleared) recordVentEvent("smoke_cleared");
+
+  ventOutputs();
+}
+
+String ventJson() {
+  return String(",\"has_mq2\":1,\"smoke_ppm\":") +
+         (smokePpm >= 0 ? String(smokePpm) : String("null")) +
+         ",\"smoke_alert\":" + String(smoke.alert ? 1 : 0) +
+         ",\"has_window\":1,\"window_open\":" + String(windowOpen ? 1 : 0) +
+         ",\"has_fan\":1,\"fan_on\":" + String(fanOn ? 1 : 0) +
+         ",\"smoke_auto_enabled\":" + String(smoke.autoEnabled ? 1 : 0) +
+         ",\"smoke_threshold_ppm\":" + String(smoke.thresholdPpm);
+}
+
+void handleVentToggle(bool isWindow) {
+  if (!authorized()) return;
+
+  const String value = server.arg("state");
+  if (value != "0" && value != "1") {
+    server.send(400, "text/plain", "Invalid state");
+    return;
+  }
+
+  const bool on = value == "1";
+
+  if (!on && smoke.alert && smoke.autoEnabled) {
+    server.send(412, "text/plain", "Smoke ventilation prevents closing");
+    return;
+  }
+
+  if (home.mode == HomeController::AWAY && !smoke.alert) {
+    server.send(409, "text/plain", "Disarm protection first");
+    return;
+  }
+
+  if (isWindow) setWindowOpen(on);
+  else setFanOn(on);
+
+  ventOutputs();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleSmokeConfig() {
+  if (!authorized()) return;
+
+  const String autoArg = server.arg("auto");
+  const String thrArg = server.arg("threshold");
+
+  bool digits = thrArg.length() > 0 && thrArg.length() <= 4;
+  for (size_t i = 0; digits && i < thrArg.length(); i++) {
+    if (thrArg[i] < '0' || thrArg[i] > '9') digits = false;
+  }
+  const int thr = digits ? thrArg.toInt() : -1;
+
+  if ((autoArg != "0" && autoArg != "1") ||
+      thr < SMOKE_MIN_PPM || thr > SMOKE_MAX_PPM) {
+    server.send(400, "text/plain", "Invalid smoke config");
+    return;
+  }
+
+  smoke.autoEnabled = autoArg == "1";
+  smoke.thresholdPpm = thr;
+  settings.putBool("smkAuto", smoke.autoEnabled);
+  settings.putInt("smkThr", smoke.thresholdPpm);
+
+  recordVentEvent("smoke_rule_changed");
+
+  if (smoke.autoEnabled && smoke.alert) {
+    setWindowOpen(true);
+    setFanOn(true);
+  }
+
+  ventOutputs();
+  server.send(200, "text/plain", "OK");
+}
+
+// ===== END MQ2 VENTILATION RUNTIME =====
+
+
 void handleSensor() {
   if (!authorized()) return;
 
@@ -746,7 +1040,7 @@ void handleSensor() {
       ",\"hold_seconds\":" + String(home.holdSeconds) +
       ",\"warmup\":" + String(warmupRemaining()) +
       ",\"light_reason\":\"" + home.lightReason + "\"" +
-      extra + liveRules + "}";
+      extra + liveRules + ventJson() + "}";
 
   server.send(200, "application/json", json);
 }
@@ -794,6 +1088,10 @@ void handleEvents() {
 
 
 void setup() {
+  // Quat TAT ngay dau setup().
+  pinMode(FAN_PIN, OUTPUT);
+  digitalWrite(FAN_PIN, FAN_ACTIVE_HIGH ? LOW : HIGH);
+
   Serial.begin(115200);
 
   pinMode(PIR_PIN, INPUT_PULLDOWN);
@@ -1160,6 +1458,20 @@ void setup() {
     server.send(200, "text/plain", "OK");
   });
 
+  // MQ-2 / cua so / quat.
+  analogSetPinAttenuation(MQ2_PIN, ADC_11db);
+  windowServo.setPeriodHertz(50);
+  windowServo.attach(WINDOW_SERVO_PIN, 500, 2400);
+  smoke.autoEnabled = settings.getBool("smkAuto", true);
+  smoke.thresholdPpm = constrain(
+      settings.getInt("smkThr", SMOKE_DEFAULT_PPM),
+      SMOKE_MIN_PPM, SMOKE_MAX_PPM);
+  ventOutputs();
+
+  server.on("/window", HTTP_POST, []() { handleVentToggle(true); });
+  server.on("/fan", HTTP_POST, []() { handleVentToggle(false); });
+  server.on("/smoke/config", HTTP_POST, handleSmokeConfig);
+
   server.begin();
 
   Serial.println(
@@ -1249,7 +1561,10 @@ void loop() {
   // Dong cua sau 5 giay khong phat hien vat can.
   autoCloseDoor();
 
+  smokeVentTick();
+
   outputs();
+  ventOutputs();
 
   delay(5);
 }
