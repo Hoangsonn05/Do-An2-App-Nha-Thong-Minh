@@ -51,7 +51,11 @@ data class GatewaySnapshot(
     val monitoring: Boolean = false,
     val mode: String = HomeMode.HOME.name,
     val temp: Int? = null,
-    val hum: Int? = null
+    val hum: Int? = null,
+    val smokePpm: Int? = null,
+    val smokeAlert: Boolean? = null,
+    val window: Boolean? = null,
+    val fan: Boolean? = null
 ) {
     constructor(
         online: Boolean,
@@ -63,7 +67,11 @@ data class GatewaySnapshot(
         monitoring: Boolean = false,
         mode: HomeMode,
         temp: Int? = null,
-        hum: Int? = null
+        hum: Int? = null,
+        smokePpm: Int? = null,
+        smokeAlert: Boolean? = null,
+        window: Boolean? = null,
+        fan: Boolean? = null
     ) : this(
         online = online,
         lastSeen = lastSeen,
@@ -74,7 +82,11 @@ data class GatewaySnapshot(
         monitoring = monitoring,
         mode = mode.name,
         temp = temp,
-        hum = hum
+        hum = hum,
+        smokePpm = smokePpm,
+        smokeAlert = smokeAlert,
+        window = window,
+        fan = fan
     )
 }
 
@@ -105,7 +117,9 @@ data class CloudConfigState(
     val coldLimit: Int,
     val autoAlarm: Boolean,
     val updatedBy: String? = null,
-    val updatedAt: Long? = null
+    val updatedAt: Long? = null,
+    val smokeLimit: Int = 300,
+    val smokeAuto: Boolean = true
 )
 
 enum class EventSeverity(val wireValue: String) {
@@ -138,7 +152,11 @@ data class GatewayStateSnapshot(
     val door: Boolean? = null,
     val alarm: Boolean? = null,
     val monitoring: Boolean? = null,
-    val mode: HomeMode? = null
+    val mode: HomeMode? = null,
+    val smokePpm: Int? = null,
+    val smokeAlert: Boolean? = null,
+    val window: Boolean? = null,
+    val fan: Boolean? = null
 )
 
 data class CloudTelemetrySnapshot(
@@ -146,7 +164,8 @@ data class CloudTelemetrySnapshot(
     val temp: Int? = null,
     val hum: Int? = null,
     val receivedAt: Long,
-    val deviceTs: Long? = null
+    val deviceTs: Long? = null,
+    val smokePpm: Int? = null
 )
 
 data class CloudEventRecord(

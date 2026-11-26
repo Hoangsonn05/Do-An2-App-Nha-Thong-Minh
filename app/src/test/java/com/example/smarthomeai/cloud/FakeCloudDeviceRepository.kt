@@ -180,7 +180,8 @@ class FakeCloudDeviceRepository(
             rawTemp = values?.get("temp"),
             rawHum = values?.get("hum"),
             rawReceivedAt = resolveReceivedAt(latest.value["receivedAt"]),
-            rawDeviceTs = latest.value["deviceTs"]
+            rawDeviceTs = latest.value["deviceTs"],
+            rawSmokePpm = values?.get("smokePpm")
         )
         if (parsed != null) {
             telemetrySnapshots[key] = parsed
@@ -453,7 +454,11 @@ class FakeCloudDeviceRepository(
             rawDoor = values?.get("door"),
             rawAlarm = values?.get("alarm"),
             rawMonitoring = values?.get("monitoring"),
-            rawMode = values?.get("mode")
+            rawMode = values?.get("mode"),
+            rawSmokePpm = values?.get("smokePpm"),
+            rawSmokeAlert = values?.get("smokeAlert"),
+            rawWindow = values?.get("window"),
+            rawFan = values?.get("fan")
         )
         if (parsed != null) {
             gatewaySnapshots[key] = parsed
@@ -500,7 +505,9 @@ class FakeCloudDeviceRepository(
             rawColdLimit = payload["coldLimit"],
             rawAutoAlarm = payload["autoAlarm"],
             rawUpdatedBy = payload["updatedBy"],
-            rawUpdatedAt = System.currentTimeMillis()
+            rawUpdatedAt = System.currentTimeMillis(),
+            rawSmokeLimit = payload["smokeLimit"],
+            rawSmokeAuto = payload["smokeAuto"]
         ) ?: return CloudResult.Err(CloudError.InvalidData, "Invalid config payload.")
 
         val current = configsByDevice[homeId to deviceId]

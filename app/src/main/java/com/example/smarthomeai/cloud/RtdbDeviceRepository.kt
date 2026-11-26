@@ -168,7 +168,11 @@ class RtdbDeviceRepository(
                 rawDoor = valuesNode.child("door").value,
                 rawAlarm = valuesNode.child("alarm").value,
                 rawMonitoring = valuesNode.child("monitoring").value,
-                rawMode = valuesNode.child("mode").value
+                rawMode = valuesNode.child("mode").value,
+                rawSmokePpm = valuesNode.child("smokePpm").value,
+                rawSmokeAlert = valuesNode.child("smokeAlert").value,
+                rawWindow = valuesNode.child("window").value,
+                rawFan = valuesNode.child("fan").value
             )
             if (parsed != null) {
                 CloudResult.Ok(parsed)
@@ -208,7 +212,8 @@ class RtdbDeviceRepository(
                     rawTemp = valuesNode.child("temp").value,
                     rawHum = valuesNode.child("hum").value,
                     rawReceivedAt = latestChild.child("receivedAt").value,
-                    rawDeviceTs = latestChild.child("deviceTs").value
+                    rawDeviceTs = latestChild.child("deviceTs").value,
+                    rawSmokePpm = valuesNode.child("smokePpm").value
                 )
                 if (parsed != null) {
                     CloudResult.Ok(parsed)
@@ -329,7 +334,9 @@ class RtdbDeviceRepository(
             rawColdLimit = snapshot.child("coldLimit").value,
             rawAutoAlarm = snapshot.child("autoAlarm").value,
             rawUpdatedBy = snapshot.child("updatedBy").value,
-            rawUpdatedAt = snapshot.child("updatedAt").value
+            rawUpdatedAt = snapshot.child("updatedAt").value,
+            rawSmokeLimit = snapshot.child("smokeLimit").value,
+            rawSmokeAuto = snapshot.child("smokeAuto").value
         ) ?: return CloudResult.Err(
             CloudError.InvalidData,
             "Malformed device config snapshot for $deviceId."
@@ -777,7 +784,9 @@ class RtdbDeviceRepository(
             rawColdLimit: Any?,
             rawAutoAlarm: Any?,
             rawUpdatedBy: Any?,
-            rawUpdatedAt: Any?
+            rawUpdatedAt: Any?,
+            rawSmokeLimit: Any? = null,
+            rawSmokeAuto: Any? = null
         ): CloudConfigState? {
             val rev = safeLong(rawRev) ?: return null
             val tempLimit = safeInt(rawTempLimit) ?: return null
@@ -786,6 +795,18 @@ class RtdbDeviceRepository(
             val autoAlarm = safeBoolean(rawAutoAlarm) ?: return null
             val updatedBy = safeString(rawUpdatedBy)
             val updatedAt = safeLong(rawUpdatedAt)
+            val smokeLimit = if (rawSmokeLimit == null) {
+                300
+            } else {
+                safeInt(rawSmokeLimit)
+                    ?.takeIf { it in CloudMapper.MIN_CONFIG_SMOKE_LIMIT..CloudMapper.MAX_CONFIG_SMOKE_LIMIT }
+                    ?: return null
+            }
+            val smokeAuto = if (rawSmokeAuto == null) {
+                true
+            } else {
+                safeBoolean(rawSmokeAuto) ?: return null
+            }
             return CloudConfigState(
                 rev = rev,
                 tempLimit = tempLimit,
@@ -793,7 +814,9 @@ class RtdbDeviceRepository(
                 coldLimit = coldLimit,
                 autoAlarm = autoAlarm,
                 updatedBy = updatedBy,
-                updatedAt = updatedAt
+                updatedAt = updatedAt,
+                smokeLimit = smokeLimit,
+                smokeAuto = smokeAuto
             )
         }
 
@@ -820,7 +843,11 @@ class RtdbDeviceRepository(
             rawDoor: Any?,
             rawAlarm: Any?,
             rawMonitoring: Any?,
-            rawMode: Any?
+            rawMode: Any?,
+            rawSmokePpm: Any? = null,
+            rawSmokeAlert: Any? = null,
+            rawWindow: Any? = null,
+            rawFan: Any? = null
         ): GatewayStateSnapshot? {
             val online = safeBoolean(rawOnline) ?: return null
             val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
@@ -838,6 +865,11 @@ class RtdbDeviceRepository(
             val mode = safeString(rawMode)?.let { modeStr ->
                 runCatching { HomeMode.valueOf(modeStr) }.getOrNull()
             }
+            val smokePpm = safeInt(rawSmokePpm)
+                ?.takeIf { it in CloudMapper.MIN_SMOKE_PPM_INCLUSIVE..CloudMapper.MAX_SMOKE_PPM_INCLUSIVE }
+            val smokeAlert = safeBoolean(rawSmokeAlert)
+            val window = safeBoolean(rawWindow)
+            val fan = safeBoolean(rawFan)
             return GatewayStateSnapshot(
                 online = online,
                 reportedBy = reportedBy,
@@ -850,7 +882,11 @@ class RtdbDeviceRepository(
                 door = door,
                 alarm = alarm,
                 monitoring = monitoring,
-                mode = mode
+                mode = mode,
+                smokePpm = smokePpm,
+                smokeAlert = smokeAlert,
+                window = window,
+                fan = fan
             )
         }
 
@@ -859,7 +895,8 @@ class RtdbDeviceRepository(
             rawTemp: Any?,
             rawHum: Any?,
             rawReceivedAt: Any?,
-            rawDeviceTs: Any?
+            rawDeviceTs: Any?,
+            rawSmokePpm: Any? = null
         ): CloudTelemetrySnapshot? {
             if (recordId.isNullOrBlank() || RtdbPaths.containsForbiddenRtdbChars(recordId)) return null
             val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
@@ -867,14 +904,17 @@ class RtdbDeviceRepository(
                 ?.takeIf { it in (CloudMapper.MIN_TEMP_EXCLUSIVE + 1) until CloudMapper.MAX_TEMP_EXCLUSIVE }
             val hum = safeInt(rawHum)
                 ?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE }
-            if (temp == null && hum == null) return null
+            val smokePpm = safeInt(rawSmokePpm)
+                ?.takeIf { it in CloudMapper.MIN_SMOKE_PPM_INCLUSIVE..CloudMapper.MAX_SMOKE_PPM_INCLUSIVE }
+            if (temp == null && hum == null && smokePpm == null) return null
             val deviceTs = safeLong(rawDeviceTs)?.takeIf { it > 0L }
             return CloudTelemetrySnapshot(
                 recordId = recordId,
                 temp = temp,
                 hum = hum,
                 receivedAt = receivedAt,
-                deviceTs = deviceTs
+                deviceTs = deviceTs,
+                smokePpm = smokePpm
             )
         }
 

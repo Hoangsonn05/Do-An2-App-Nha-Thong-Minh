@@ -4,6 +4,8 @@ import com.example.smarthomeai.data.DeviceEvent
 import com.example.smarthomeai.data.HomeMode
 import com.example.smarthomeai.data.SensorSample
 import com.example.smarthomeai.data.SmartHomeState
+import com.example.smarthomeai.data.effectiveSmokeAuto
+import com.example.smarthomeai.data.smokeHazardActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -49,7 +51,13 @@ data class GatewayInputSnapshot(
     val coldLimit: Int = 18,
     val autoAlarm: Boolean = true,
     val latestSample: SensorSample? = null,
-    val recentEvents: List<DeviceEvent> = emptyList()
+    val recentEvents: List<DeviceEvent> = emptyList(),
+    val smokePpm: Int? = null,
+    val smokeAlert: Boolean? = null,
+    val windowOpen: Boolean? = null,
+    val fanOn: Boolean? = null,
+    val smokeLimit: Int = 300,
+    val smokeAuto: Boolean = true
 )
 
 fun SmartHomeState.toGatewayInput(): GatewayInputSnapshot = GatewayInputSnapshot(
@@ -68,7 +76,13 @@ fun SmartHomeState.toGatewayInput(): GatewayInputSnapshot = GatewayInputSnapshot
     coldLimit = coldLimit,
     autoAlarm = autoAlarm,
     latestSample = samples.lastOrNull(),
-    recentEvents = deviceEvents
+    recentEvents = deviceEvents,
+    smokePpm = hardware?.smokePpm,
+    smokeAlert = if (esp32Online) smokeHazardActive else hardware?.smokeAlert,
+    windowOpen = hardware?.windowOpen,
+    fanOn = hardware?.fanOn,
+    smokeLimit = smokeLimit,
+    smokeAuto = effectiveSmokeAuto
 )
 
 /**
@@ -107,14 +121,20 @@ class CloudGatewaySync(
         val monitoring: Boolean,
         val mode: HomeMode,
         val temp: Int?,
-        val hum: Int?
+        val hum: Int?,
+        val smokePpm: Int?,
+        val smokeAlert: Boolean?,
+        val windowOpen: Boolean?,
+        val fanOn: Boolean?
     )
 
     private data class ConfigValues(
         val tempLimit: Int,
         val humLimit: Int,
         val coldLimit: Int,
-        val autoAlarm: Boolean
+        val autoAlarm: Boolean,
+        val smokeLimit: Int,
+        val smokeAuto: Boolean
     )
 
     private data class StampedInput(
@@ -301,7 +321,14 @@ class CloudGatewaySync(
                     val cfg = cfgRes.data
                     loadedRev = cfg?.rev
                     loadedConfig = cfg?.let {
-                        ConfigValues(it.tempLimit, it.humLimit, it.coldLimit, it.autoAlarm)
+                        ConfigValues(
+                            tempLimit = it.tempLimit,
+                            humLimit = it.humLimit,
+                            coldLimit = it.coldLimit,
+                            autoAlarm = it.autoAlarm,
+                            smokeLimit = it.smokeLimit,
+                            smokeAuto = it.smokeAuto
+                        )
                     }
                     configLoaded = true
                 }
@@ -423,7 +450,9 @@ class CloudGatewaySync(
                     coldLimit = desired.coldLimit,
                     autoAlarm = desired.autoAlarm,
                     updatedByUid = uid,
-                    timestampValue = CloudMapper.SERVER_TIMESTAMP_PLACEHOLDER
+                    timestampValue = CloudMapper.SERVER_TIMESTAMP_PLACEHOLDER,
+                    smokeLimit = desired.smokeLimit,
+                    smokeAuto = desired.smokeAuto
                 )
             } catch (e: IllegalArgumentException) {
                 return CloudResult.Err(CloudError.InvalidData, e.message)
@@ -454,7 +483,9 @@ class CloudGatewaySync(
                             coldLimit = desired.coldLimit,
                             autoAlarm = desired.autoAlarm,
                             updatedByUid = uid,
-                            timestampValue = CloudMapper.SERVER_TIMESTAMP_PLACEHOLDER
+                            timestampValue = CloudMapper.SERVER_TIMESTAMP_PLACEHOLDER,
+                            smokeLimit = desired.smokeLimit,
+                            smokeAuto = desired.smokeAuto
                         )
                     } catch (e: IllegalArgumentException) {
                         return CloudResult.Err(CloudError.InvalidData, e.message)
@@ -569,7 +600,11 @@ class CloudGatewaySync(
                     monitoring = offlineValues.monitoring,
                     mode = offlineValues.mode.name,
                     temp = offlineValues.temp,
-                    hum = offlineValues.hum
+                    hum = offlineValues.hum,
+                    smokePpm = offlineValues.smokePpm,
+                    smokeAlert = offlineValues.smokeAlert,
+                    window = offlineValues.windowOpen,
+                    fan = offlineValues.fanOn
                 )
                 val offlinePayload = try {
                     CloudMapper.buildGatewayStatePayload(
@@ -623,7 +658,11 @@ class CloudGatewaySync(
                         monitoring = currentValues.monitoring,
                         mode = currentValues.mode.name,
                         temp = currentValues.temp,
-                        hum = currentValues.hum
+                        hum = currentValues.hum,
+                        smokePpm = currentValues.smokePpm,
+                        smokeAlert = currentValues.smokeAlert,
+                        window = currentValues.windowOpen,
+                        fan = currentValues.fanOn
                     )
                     val statePayload = try {
                         CloudMapper.buildGatewayStatePayload(
@@ -769,14 +808,20 @@ class CloudGatewaySync(
         monitoring = monitoring,
         mode = mode,
         temp = temperature?.takeIf { it > CloudMapper.MIN_TEMP_EXCLUSIVE && it < CloudMapper.MAX_TEMP_EXCLUSIVE },
-        hum = humidity?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE }
+        hum = humidity?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE },
+        smokePpm = smokePpm?.takeIf { it in CloudMapper.MIN_SMOKE_PPM_INCLUSIVE..CloudMapper.MAX_SMOKE_PPM_INCLUSIVE },
+        smokeAlert = smokeAlert,
+        windowOpen = windowOpen,
+        fanOn = fanOn
     )
 
     private fun GatewayInputSnapshot.toConfigValues(): ConfigValues = ConfigValues(
         tempLimit = temperatureLimit,
         humLimit = humidityLimit,
         coldLimit = coldLimit,
-        autoAlarm = autoAlarm
+        autoAlarm = autoAlarm,
+        smokeLimit = smokeLimit,
+        smokeAuto = smokeAuto
     )
 
     private fun computeNextRev(previousRev: Long?): Long =

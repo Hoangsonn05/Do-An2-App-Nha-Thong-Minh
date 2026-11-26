@@ -138,6 +138,10 @@
                   "temp": { ".validate": "newData.isNumber() && newData.val() > -50 && newData.val() < 150" },
                   "hum": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
                   "mode": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 16" },
+                  "smokePpm": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
+                  "smokeAlert": { ".validate": "newData.isBoolean()" },
+                  "window": { ".validate": "newData.isBoolean()" },
+                  "fan": { ".validate": "newData.isBoolean()" },
                   "$other": { ".validate": false }
                 },
                 "$other": {
@@ -170,6 +174,10 @@
                   "temp": { ".validate": "newData.isNumber() && newData.val() > -50 && newData.val() < 150" },
                   "hum": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
                   "mode": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 16" },
+                  "smokePpm": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
+                  "smokeAlert": { ".validate": "newData.isBoolean()" },
+                  "window": { ".validate": "newData.isBoolean()" },
+                  "fan": { ".validate": "newData.isBoolean()" },
                   "$other": { ".validate": false }
                 },
                 "$other": {
@@ -189,6 +197,8 @@
               "humLimit": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
               "coldLimit": { ".validate": "newData.isNumber() && newData.val() >= -10 && newData.val() <= 40" },
               "autoAlarm": { ".validate": "newData.isBoolean()" },
+              "smokeLimit": { ".validate": "newData.isNumber() && newData.val() >= 50 && newData.val() <= 5000" },
+              "smokeAuto": { ".validate": "newData.isBoolean()" },
               "$other": { ".validate": false }
             },
 
@@ -205,6 +215,7 @@
                   ".validate": "newData.hasChildren()",
                   "temp": { ".validate": "newData.isNumber() && newData.val() > -50 && newData.val() < 150" },
                   "hum": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+                  "smokePpm": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
                   "$other": { ".validate": false }
                 },
                 "$other": { ".validate": false }
@@ -218,7 +229,7 @@
                 ".write": "@AUTH && !data.exists() && newData.exists() && @MEMBER && @ACTIVE && $cmdId.matches(/^[A-Za-z0-9_-]{8,64}$/)",
                 ".validate": "newData.hasChildren(['type','params','createdBy','status','createdAt','ttlMs'])",
                 "type": {
-                  ".validate": "newData.val() === 'light.set' || newData.val() === 'door.set' || newData.val() === 'alarm.set' || newData.val() === 'mode.set' || newData.val() === 'clothes.set'"
+                  ".validate": "newData.val() === 'light.set' || newData.val() === 'door.set' || newData.val() === 'alarm.set' || newData.val() === 'mode.set' || newData.val() === 'clothes.set' || newData.val() === 'window.set' || newData.val() === 'fan.set'"
                 },
                 "params": {
                   ".validate": "newData.hasChildren()",

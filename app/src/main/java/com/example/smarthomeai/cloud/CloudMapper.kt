@@ -24,6 +24,8 @@ object CloudMapper {
     const val MAX_TEMP_EXCLUSIVE: Int = 150
     const val MIN_HUM_INCLUSIVE: Int = 0
     const val MAX_HUM_INCLUSIVE: Int = 100
+    const val MIN_SMOKE_PPM_INCLUSIVE: Int = 0
+    const val MAX_SMOKE_PPM_INCLUSIVE: Int = 10_000
 
     const val MIN_CONFIG_TEMP_LIMIT: Int = 0
     const val MAX_CONFIG_TEMP_LIMIT: Int = 80
@@ -31,6 +33,8 @@ object CloudMapper {
     const val MAX_CONFIG_HUM_LIMIT: Int = 100
     const val MIN_CONFIG_COLD_LIMIT: Int = -10
     const val MAX_CONFIG_COLD_LIMIT: Int = 40
+    const val MIN_CONFIG_SMOKE_LIMIT: Int = 50
+    const val MAX_CONFIG_SMOKE_LIMIT: Int = 5_000
 
     val SERVER_TIMESTAMP_PLACEHOLDER: Map<String, String> = mapOf(".sv" to "timestamp")
 
@@ -40,7 +44,9 @@ object CloudMapper {
     private val CRITICAL_EVENT_KINDS = setOf(
         "alarm_started",
         "motion_alarm",
-        "proximity_alarm"
+        "proximity_alarm",
+        "smoke_detected",
+        "smoke_auto_vent"
     )
 
     private val WARN_EVENT_KINDS = setOf(
@@ -131,7 +137,7 @@ object CloudMapper {
         }
         validateNoSecretToken(cleanMode, "Gateway mode")
 
-        val values = LinkedHashMap<String, Any>(8).apply {
+        val values = LinkedHashMap<String, Any>(12).apply {
             put("light", snapshot.light)
             put("door", snapshot.door)
             put("alarm", snapshot.alarm)
@@ -144,6 +150,12 @@ object CloudMapper {
             snapshot.hum
                 ?.takeIf { it in MIN_HUM_INCLUSIVE..MAX_HUM_INCLUSIVE }
                 ?.let { put("hum", it) }
+            snapshot.smokePpm
+                ?.takeIf { it in MIN_SMOKE_PPM_INCLUSIVE..MAX_SMOKE_PPM_INCLUSIVE }
+                ?.let { put("smokePpm", it) }
+            snapshot.smokeAlert?.let { put("smokeAlert", it) }
+            snapshot.window?.let { put("window", it) }
+            snapshot.fan?.let { put("fan", it) }
         }
 
         return LinkedHashMap<String, Any>(5).apply {
@@ -165,7 +177,53 @@ object CloudMapper {
         autoAlarm: Boolean,
         updatedByUid: String,
         timestampValue: Any
+    ): Map<String, Any> = buildBaseConfigPayload(
+        previousRev = previousRev,
+        tempLimit = tempLimit,
+        humLimit = humLimit,
+        coldLimit = coldLimit,
+        autoAlarm = autoAlarm,
+        updatedByUid = updatedByUid,
+        timestampValue = timestampValue
+    )
+
+    fun buildConfigPayload(
+        previousRev: Long?,
+        tempLimit: Int,
+        humLimit: Int,
+        coldLimit: Int,
+        autoAlarm: Boolean,
+        updatedByUid: String,
+        timestampValue: Any,
+        smokeLimit: Int = 300,
+        smokeAuto: Boolean = true
     ): Map<String, Any> {
+        require(smokeLimit in MIN_CONFIG_SMOKE_LIMIT..MAX_CONFIG_SMOKE_LIMIT) {
+            "smokeLimit must be within $MIN_CONFIG_SMOKE_LIMIT..$MAX_CONFIG_SMOKE_LIMIT."
+        }
+        return buildBaseConfigPayload(
+            previousRev = previousRev,
+            tempLimit = tempLimit,
+            humLimit = humLimit,
+            coldLimit = coldLimit,
+            autoAlarm = autoAlarm,
+            updatedByUid = updatedByUid,
+            timestampValue = timestampValue
+        ).apply {
+            put("smokeLimit", smokeLimit)
+            put("smokeAuto", smokeAuto)
+        }
+    }
+
+    private fun buildBaseConfigPayload(
+        previousRev: Long?,
+        tempLimit: Int,
+        humLimit: Int,
+        coldLimit: Int,
+        autoAlarm: Boolean,
+        updatedByUid: String,
+        timestampValue: Any
+    ): LinkedHashMap<String, Any> {
         val validUid = RtdbPaths.requireValidUid(updatedByUid)
         require(tempLimit in MIN_CONFIG_TEMP_LIMIT..MAX_CONFIG_TEMP_LIMIT) {
             "tempLimit must be within $MIN_CONFIG_TEMP_LIMIT..$MAX_CONFIG_TEMP_LIMIT."
@@ -197,7 +255,8 @@ object CloudMapper {
         temp = sample.temperature,
         hum = sample.humidity,
         reportedByUid = reportedByUid,
-        timestampValue = timestampValue
+        timestampValue = timestampValue,
+        smokePpm = sample.smokePpm
     )
 
     fun buildTelemetryPayload(
@@ -205,14 +264,16 @@ object CloudMapper {
         temp: Int?,
         hum: Int?,
         reportedByUid: String,
-        timestampValue: Any
+        timestampValue: Any,
+        smokePpm: Int? = null
     ): Pair<String, Map<String, Any>>? {
         require(timestampMs > 0L) { "Telemetry timestamp must be positive." }
         val validUid = RtdbPaths.requireValidUid(reportedByUid)
 
-        val values = LinkedHashMap<String, Any>(2).apply {
+        val values = LinkedHashMap<String, Any>(3).apply {
             temp?.takeIf { it > MIN_TEMP_EXCLUSIVE && it < MAX_TEMP_EXCLUSIVE }?.let { put("temp", it) }
             hum?.takeIf { it in MIN_HUM_INCLUSIVE..MAX_HUM_INCLUSIVE }?.let { put("hum", it) }
+            smokePpm?.takeIf { it in MIN_SMOKE_PPM_INCLUSIVE..MAX_SMOKE_PPM_INCLUSIVE }?.let { put("smokePpm", it) }
         }
         if (values.isEmpty()) return null
 
