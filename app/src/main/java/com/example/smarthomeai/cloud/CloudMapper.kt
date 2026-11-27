@@ -156,6 +156,8 @@ object CloudMapper {
             snapshot.smokeAlert?.let { put("smokeAlert", it) }
             snapshot.window?.let { put("window", it) }
             snapshot.fan?.let { put("fan", it) }
+            snapshot.longSensors?.gatewayValues()?.takeIf { it.isNotEmpty() }
+                ?.let { put("longSensors", it) }
         }
 
         return LinkedHashMap<String, Any>(5).apply {

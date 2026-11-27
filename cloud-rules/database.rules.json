@@ -160,6 +160,27 @@
                   "fan": {
                     ".validate": "newData.isBoolean()"
                   },
+                  "longSensors": {
+                    ".validate": "newData.hasChildren()",
+                    "lightLux": {
+                      ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 60000"
+                    },
+                    "reedClosed": {
+                      ".validate": "newData.isBoolean()"
+                    },
+                    "rainRaw": {
+                      ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4095 && newData.val() % 1 === 0"
+                    },
+                    "rfidReady": {
+                      ".validate": "newData.isBoolean()"
+                    },
+                    "lcdReady": {
+                      ".validate": "newData.isBoolean()"
+                    },
+                    "$other": {
+                      ".validate": false
+                    }
+                  },
                   "$other": {
                     ".validate": false
                   }

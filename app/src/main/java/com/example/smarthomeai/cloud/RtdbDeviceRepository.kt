@@ -1,5 +1,6 @@
 package com.example.smarthomeai.cloud
 
+import com.example.smarthomeai.data.LongSensorReadings
 import com.example.smarthomeai.data.HomeMode
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
@@ -172,7 +173,8 @@ class RtdbDeviceRepository(
                 rawSmokePpm = valuesNode.child("smokePpm").value,
                 rawSmokeAlert = valuesNode.child("smokeAlert").value,
                 rawWindow = valuesNode.child("window").value,
-                rawFan = valuesNode.child("fan").value
+                rawFan = valuesNode.child("fan").value,
+                rawLongSensors = valuesNode.child("longSensors").value
             )
             if (parsed != null) {
                 CloudResult.Ok(parsed)
@@ -847,7 +849,8 @@ class RtdbDeviceRepository(
             rawSmokePpm: Any? = null,
             rawSmokeAlert: Any? = null,
             rawWindow: Any? = null,
-            rawFan: Any? = null
+            rawFan: Any? = null,
+            rawLongSensors: Any? = null
         ): GatewayStateSnapshot? {
             val online = safeBoolean(rawOnline) ?: return null
             val receivedAt = safeLong(rawReceivedAt)?.takeIf { it > 0L } ?: return null
@@ -886,7 +889,8 @@ class RtdbDeviceRepository(
                 smokePpm = smokePpm,
                 smokeAlert = smokeAlert,
                 window = window,
-                fan = fan
+                fan = fan,
+                longSensors = LongSensorReadings.fromGateway(rawLongSensors)
             )
         }
 
