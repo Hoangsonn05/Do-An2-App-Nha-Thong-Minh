@@ -20,10 +20,11 @@ data class HardwareStatus(
     val hasFan: Boolean = false,
     val fanOn: Boolean? = null,
     val smokeAutoEnabled: Boolean? = null,
-    val smokeThresholdPpm: Int = DEFAULT_SMOKE_LIMIT_PPM
+    val smokeThresholdPpm: Int = DEFAULT_SMOKE_LIMIT_PPM,
+    val longSensors: LongSensorReadings? = null
 ) {
     // Rules in the user's supplied firmware. They are not configurable over HTTP.
-    val usesDoorRules get() = profile == "dht11-leds"
+    val usesDoorRules get() = profile == "dht11-leds" || profile == "long-bosung"
     val instantModes get() = securityProfile=="instant-20s"
     val nearObject: Boolean? get() = if(usesDoorRules) distanceCm?.let { it in 2f..proximityCm } else null
     val doorBlocked get() = obstacle == true || (usesDoorRules && distanceCm?.let { it in 2f..DOOR_CLEARANCE_CM } == true) || ((instantModes || securityProfile == "demo-two-modes") && distanceCm == null)
@@ -69,7 +70,7 @@ data class HardwareStatus(
                 json.optString("security_profile","").takeIf {it.isNotBlank()},flag("alarm_active"),json.optString("alarm_source","").takeIf {it.isNotBlank()},
                 flag("proximity_alarm_enabled"),json.optDouble("ultrasonic_alarm_cm",10.0).toFloat().takeIf {it.isFinite() && it in 2f..400f} ?: 10f,
                 json.optInt("door_auto_close_seconds",5).coerceIn(1,120),if(json.isNull("door_auto_close_remaining")) null else json.optInt("door_auto_close_remaining").coerceIn(0,120),AlarmSettings.parse(json),
-                hasMq2,smokePpm,smokeAlert,hasWindow,windowOpen,hasFan,fanOn,smokeAutoEnabled,smokeThresholdPpm)
+                hasMq2,smokePpm,smokeAlert,hasWindow,windowOpen,hasFan,fanOn,smokeAutoEnabled,smokeThresholdPpm,LongSensorReadings.fromFirmware(json))
         }
     }
 }

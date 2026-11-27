@@ -1,12 +1,12 @@
 /*
  * SMART HOME ESP32 - TOAN BO CHUONG TRINH TRONG MOT FILE
  * Arduino IDE: ESP32 Dev Module.
- * Thu vien: DHT sensor library, Adafruit Unified Sensor, ESP32Servo.
+ * Thu vien: DHT sensor library, Adafruit Unified Sensor, ESP32Servo, MFRC522.
  *
  * Bo sung:
- * - HOME: dieu khien binh thuong, PIR bat coi 3 giay.
+ * - HOME: dieu khien binh thuong, PIR bat LED canh bao va coi 3 giay.
  * - AWAY: tat den, dong cua va giam sat ngay khi vung cua an toan.
- * - Khi giam sat: PIR bat coi 10 giay. Sieu am chi kiem tra vung cua.
+ * - Khi giam sat: PIR nhay LED canh bao va coi 10 giay. Sieu am chi kiem tra vung cua.
  * - HOME: cua dang mo, vung cua trong 5 giay thi tu dong dong.
  *
  * Servo dung nguon 5V ngoai, GND chung.
@@ -19,6 +19,8 @@
 #include <DHT.h>
 #include <ESP32Servo.h>
 #include <Preferences.h>
+#include <driver/gpio.h>
+#include "LongSensors.h"
 #include <time.h>
 #include <sys/time.h>
 
@@ -29,38 +31,32 @@
 #if __has_include("wifi_config.h")
 #include "wifi_config.h"
 #else
-const char* WIFI_SSID = "";
-const char* WIFI_PASS = "";
+const char* WIFI_SSID = "Wifi6";
+const char* WIFI_PASS = "12125112006";
 #endif
 
 // De trong de ket noi bang IP trong cung LAN.
 const char* DEVICE_KEY = "";
 
 constexpr int DHT_PIN = 4;
-constexpr int PIR_PIN = 32;
-constexpr int OBSTACLE_PIN = 27;
+constexpr int PIR_PIN = 27;
+constexpr int OBSTACLE_PIN = 14;
 
-constexpr int TRIG_PIN = 16;
-constexpr int ECHO_PIN = 17;
-constexpr int RAIN_PIN = 33;
+constexpr int TRIG_PIN = 26;
+constexpr int ECHO_PIN = 25;
+constexpr int RAIN_PIN = 34;
 
 constexpr int SERVO_PIN = 18;
-constexpr int LIGHT_PIN = 25;
-constexpr int ALARM_PIN = 26;
+constexpr int LIGHT_PIN = 2;
+constexpr int ALARM_PIN = 15;
+constexpr int BUZZER_PIN = 12;  // Active 5 V buzzer via Q1 on Long_BoSung.
 
-constexpr int CLOTHES_SERVO_PIN = 19;
-constexpr int BUZZER_PIN = 14;
-
-// true: coi thu dong; false: coi chu dong.
-constexpr bool BUZZER_PASSIVE = true;
-constexpr uint32_t BUZZER_FREQUENCY = 2000;
-constexpr uint8_t BUZZER_PWM_CHANNEL = 14;
-
+constexpr int CLOTHES_SERVO_PIN = 21;
 constexpr int CLOTHES_RETRACTED_ANGLE = 0;
 constexpr int CLOTHES_EXTENDED_ANGLE = 90;
 
 constexpr bool OBSTACLE_ACTIVE_LOW = true;
-constexpr bool RAIN_ACTIVE_LOW = true;
+
 
 constexpr int SERVO_CLOSED_ANGLE = 0;
 constexpr int SERVO_OPEN_ANGLE = 90;
@@ -73,8 +69,8 @@ constexpr float ULTRASONIC_ALARM_CM = 10.0f;
 // Tu dong dong cua sau 5 giay khong co vat can.
 constexpr uint32_t DOOR_AUTO_CLOSE_MS = 5000;
 
-// ECHO--1k--GPIO17--2k--GND.
-// LED noi tiep dien tro 220-330 ohm.
+// ECHO--2k--GPIO25--3.3k--GND.
+// LED den GPIO2 HIGH, LED canh bao GPIO15 LOW; moi LED co 680 ohm.
 // Servo dung nguon 5V ngoai va GND chung.
 
 // ===== END CONFIG =====
@@ -273,10 +269,10 @@ private:
 // MQ-2 (GPIO34, ADC1) + servo cua so (GPIO21) + quat (GPIO22).
 // AO 5V -> cau phan ap 10k (tren) / 20k (duoi) -> GPIO34.
 // Servo cua so dung nguon 5V ngoai, GND chung.
-constexpr int MQ2_PIN = 34;
-constexpr int WINDOW_SERVO_PIN = 21;
-constexpr int FAN_PIN = 22;
-constexpr bool FAN_ACTIVE_HIGH = true;
+constexpr int MQ2_PIN = 35;
+constexpr int WINDOW_SERVO_PIN = 19;
+constexpr int FAN_PIN = 23;
+constexpr bool FAN_ACTIVE_HIGH = false;
 
 constexpr int WINDOW_CLOSED_ANGLE = 0;
 constexpr int WINDOW_OPEN_ANGLE = 90;
@@ -413,9 +409,7 @@ uint32_t lastGoodDht = 0;
 
 int lastServo = -1;
 int lastClothesServo = -1;
-int lastBuzzer = -1;
 
-bool buzzerReady = false;
 bool pirReady = false;
 bool setupPortal = false;
 
@@ -436,6 +430,14 @@ String savedSsid;
 String savedPass;
 
 
+LongSensors longSensors;
+int rainRaw = 0;
+
+bool readRain() {
+  rainRaw = analogRead(RAIN_PIN);
+  return rainRaw <= (rainInput.value ? LongSensors::rainDryAdc : LongSensors::rainWetAdc);
+}
+
 void readExtraSensors(bool force = false) {
   obstacleInput.update(
       digitalRead(OBSTACLE_PIN) ==
@@ -444,8 +446,7 @@ void readExtraSensors(bool force = false) {
   );
 
   if (rainInput.update(
-          digitalRead(RAIN_PIN) ==
-              (RAIN_ACTIVE_LOW ? LOW : HIGH),
+          readRain(),
           millis())) {
 
     recordEvent(
@@ -731,10 +732,24 @@ void recordEvent(const char* kind) {
 }
 
 
+void autoLightTick(bool motion) {
+  static bool previousMotion = false;
+  if (home.mode != HomeController::HOME) {
+    previousMotion = false;
+    return;
+  }
+
+  if (motion == previousMotion) return;
+  previousMotion = motion;
+  // Lệnh tay có hiệu lực cho đến khi trạng thái PIR đổi.
+  home.light = motion;
+  home.lightReason = motion ? "auto_motion" : "auto_clear";
+}
+
 void outputs() {
   digitalWrite(LIGHT_PIN, home.light ? HIGH : LOW);
 
-  // HOME uses a steady buzzer; AWAY pulses the buzzer during an incident.
+  // Drive the alarm LED and active buzzer from the same HOME/AWAY pattern.
   bool alarmOutput =
       alarmSignal(
           home.alarm,
@@ -742,18 +757,8 @@ void outputs() {
           millis()
       );
 
-  digitalWrite(ALARM_PIN, alarmOutput ? HIGH : LOW);
-
-  if (buzzerReady && lastBuzzer != (int)alarmOutput) {
-    if (BUZZER_PASSIVE) {
-      ledcWrite(BUZZER_PIN, alarmOutput ? 128 : 0);
-    }
-    else {
-      digitalWrite(BUZZER_PIN, alarmOutput ? HIGH : LOW);
-    }
-
-    lastBuzzer = alarmOutput;
-  }
+  digitalWrite(ALARM_PIN, alarmOutput ? LOW : HIGH);
+  digitalWrite(BUZZER_PIN, alarmOutput ? HIGH : LOW);
 
   int position =
       home.door ? SERVO_OPEN_ANGLE : SERVO_CLOSED_ANGLE;
@@ -858,7 +863,7 @@ int readSmokePpm(uint32_t now) {
 
   if (mv <= 0.0f || mv >= 3300.0f) return -2;  // mau loi
 
-  const float vout = mv * 1.5f / 1000.0f;  // cau phan ap 10k/20k
+  const float vout = mv * 1.6f / 1000.0f;  // 12k AO-to-ADC, 20k ADC-to-GND.
   if (vout >= MQ2_VCC) return -2;
 
   const float rs = MQ2_RL_KOHM * (MQ2_VCC - vout) / vout;
@@ -998,8 +1003,7 @@ void handleSensor() {
   liveRules+=","+q+"door_auto_close_remaining"+q+":"+(home.door && doorClearTiming && !home.protecting() ? String(closeRemaining):String("null"));
 
   String extra =
-      ",\"hardware_profile\":\"dht11-leds\",\"has_buzzer\":" +
-      String(buzzerReady ? 1 : 0) +
+      ",\"hardware_profile\":\"long-bosung\",\"has_buzzer\":1"
       ",\"auth_required\":" +
       String(DEVICE_KEY[0] ? 1 : 0) +
       ",\"has_clothesline\":1,\"clothes_retracted\":" +
@@ -1040,7 +1044,7 @@ void handleSensor() {
       ",\"hold_seconds\":" + String(home.holdSeconds) +
       ",\"warmup\":" + String(warmupRemaining()) +
       ",\"light_reason\":\"" + home.lightReason + "\"" +
-      extra + liveRules + ventJson() + "}";
+      extra + liveRules + ventJson() + longSensors.telemetry(rainRaw) + "}";
 
   server.send(200, "application/json", json);
 }
@@ -1089,6 +1093,7 @@ void handleEvents() {
 
 void setup() {
   // Quat TAT ngay dau setup().
+  gpio_set_level(static_cast<gpio_num_t>(FAN_PIN), FAN_ACTIVE_HIGH ? LOW : HIGH);
   pinMode(FAN_PIN, OUTPUT);
   digitalWrite(FAN_PIN, FAN_ACTIVE_HIGH ? LOW : HIGH);
 
@@ -1096,20 +1101,23 @@ void setup() {
 
   pinMode(PIR_PIN, INPUT_PULLDOWN);
   pinMode(LIGHT_PIN, OUTPUT);
+  gpio_set_level(static_cast<gpio_num_t>(ALARM_PIN), HIGH);
   pinMode(ALARM_PIN, OUTPUT);
-
+  gpio_set_level(static_cast<gpio_num_t>(BUZZER_PIN), LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
+
   pinMode(OBSTACLE_PIN, INPUT_PULLUP);
-  pinMode(RAIN_PIN, INPUT_PULLUP);
+  pinMode(RAIN_PIN, INPUT);
+  analogReadResolution(12);
 
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
   digitalWrite(TRIG_PIN, LOW);
   digitalWrite(LIGHT_PIN, LOW);
-  digitalWrite(ALARM_PIN, LOW);
+  digitalWrite(ALARM_PIN, HIGH);
 
   obstacleInput.begin(
       digitalRead(OBSTACLE_PIN) ==
@@ -1118,39 +1126,22 @@ void setup() {
   );
 
   rainInput.begin(
-      digitalRead(RAIN_PIN) ==
-          (RAIN_ACTIVE_LOW ? LOW : HIGH),
+      readRain(),
       millis()
   );
 
   servo.setPeriodHertz(50);
-  servo.attach(SERVO_PIN, 500, 2400);
+  servo.attach(SERVO_PIN, 1000, 2000);
 
   clothesServo.setPeriodHertz(50);
-  clothesServo.attach(CLOTHES_SERVO_PIN, 500, 2400);
-
-  buzzerReady =
-      BUZZER_PASSIVE ?
-      ledcAttachChannel(
-          BUZZER_PIN,
-          BUZZER_FREQUENCY,
-          8,
-          BUZZER_PWM_CHANNEL
-      ) :
-      true;
-
-  if (!buzzerReady) {
-    Serial.println(
-        "[Buzzer] PWM init failed; check LEDC channel allocation."
-    );
-  }
+  clothesServo.attach(CLOTHES_SERVO_PIN, 1000, 2000);
 
   outputs();
 
   settings.begin("smarthome", false);
 
   clothesline.autoRain =
-      settings.getBool("clothesAuto", true);
+      settings.getBool("clothesAuto", false);
 
   if (settings.getBytesLength("journal3") == sizeof(journal)) {
     settings.getBytes("journal3", &journal, sizeof(journal));
@@ -1196,6 +1187,7 @@ void setup() {
   );
 
   dht.begin();
+  longSensors.begin();
 
   savedSsid = settings.getString("wifi_ssid", "");
   savedPass = settings.getString("wifi_pass", "");
@@ -1310,8 +1302,7 @@ void setup() {
 
     bool raining =
         rainInput.value ||
-        digitalRead(RAIN_PIN) ==
-            (RAIN_ACTIVE_LOW ? LOW : HIGH);
+        readRain();
 
     if (!clothesline.setRetracted(value == "1", raining)) {
       server.send(
@@ -1352,8 +1343,7 @@ void setup() {
 
     if (clothesline.tick(
             rainInput.value ||
-            digitalRead(RAIN_PIN) ==
-                (RAIN_ACTIVE_LOW ? LOW : HIGH))) {
+            readRain())) {
 
       recordEvent("clothes_rain_retract");
     }
@@ -1461,7 +1451,7 @@ void setup() {
   // MQ-2 / cua so / quat.
   analogSetPinAttenuation(MQ2_PIN, ADC_11db);
   windowServo.setPeriodHertz(50);
-  windowServo.attach(WINDOW_SERVO_PIN, 500, 2400);
+  windowServo.attach(WINDOW_SERVO_PIN, 1000, 2000);
   smoke.autoEnabled = settings.getBool("smkAuto", true);
   smoke.thresholdPpm = constrain(
       settings.getInt("smkThr", SMOKE_DEFAULT_PPM),
@@ -1473,19 +1463,6 @@ void setup() {
   server.on("/smoke/config", HTTP_POST, handleSmokeConfig);
 
   server.begin();
-
-  Serial.println(
-      "DHT22 GPIO4, PIR GPIO32, FC51 GPIO27, "
-      "SRF05 GPIO16/17, rain GPIO33, "
-      "door servo GPIO18, clothesline servo GPIO19, "
-      "buzzer GPIO14, green LED25, yellow LED26."
-  );
-
-  Serial.println(
-      BUZZER_PASSIVE ?
-      "Buzzer: passive, PWM 2000 Hz on GPIO14." :
-      "Buzzer: active, HIGH/LOW on GPIO14."
-  );
 
   Serial.println(
       "PIR settling for 60s. Default: IP-only LAN, no device key."
@@ -1556,12 +1533,21 @@ void loop() {
     pirReady = true;
   }
 
-  home.tick(millis(), pirReady && digitalRead(PIR_PIN) == HIGH, unsafeDoorZone());
+  const bool motion = pirReady && digitalRead(PIR_PIN) == HIGH;
+  home.tick(millis(), motion, unsafeDoorZone());
 
   // Dong cua sau 5 giay khong phat hien vat can.
   autoCloseDoor();
 
   smokeVentTick();
+  longSensors.tick(temperature, humidity, lastGoodDht, rainInput.value, smoke.alert);
+  autoLightTick(motion);
+  if (longSensors.takeReedChange()) {
+    recordEvent(longSensors.reedClosed() ? "reed_closed" : "reed_open");
+  }
+  if (longSensors.takeAllowedCard() && !home.door && home.manual("door", true, millis())) {
+    recordEvent("rfid_door_open");
+  }
 
   outputs();
   ventOutputs();

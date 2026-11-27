@@ -1,5 +1,6 @@
 package com.example.smarthomeai.cloud
 
+import com.example.smarthomeai.data.LongSensorReadings
 import com.example.smarthomeai.data.DeviceEvent
 import com.example.smarthomeai.data.HomeMode
 import com.example.smarthomeai.data.SensorSample
@@ -53,6 +54,7 @@ data class GatewayInputSnapshot(
     val latestSample: SensorSample? = null,
     val recentEvents: List<DeviceEvent> = emptyList(),
     val smokePpm: Int? = null,
+    val longSensors: LongSensorReadings? = null,
     val smokeAlert: Boolean? = null,
     val windowOpen: Boolean? = null,
     val fanOn: Boolean? = null,
@@ -78,6 +80,7 @@ fun SmartHomeState.toGatewayInput(): GatewayInputSnapshot = GatewayInputSnapshot
     latestSample = samples.lastOrNull(),
     recentEvents = deviceEvents,
     smokePpm = hardware?.smokePpm,
+    longSensors = hardware?.longSensors,
     smokeAlert = if (esp32Online) smokeHazardActive else hardware?.smokeAlert,
     windowOpen = hardware?.windowOpen,
     fanOn = hardware?.fanOn,
@@ -123,6 +126,7 @@ class CloudGatewaySync(
         val temp: Int?,
         val hum: Int?,
         val smokePpm: Int?,
+        val longSensors: LongSensorReadings?,
         val smokeAlert: Boolean?,
         val windowOpen: Boolean?,
         val fanOn: Boolean?
@@ -604,7 +608,8 @@ class CloudGatewaySync(
                     smokePpm = offlineValues.smokePpm,
                     smokeAlert = offlineValues.smokeAlert,
                     window = offlineValues.windowOpen,
-                    fan = offlineValues.fanOn
+                    fan = offlineValues.fanOn,
+                    longSensors = offlineValues.longSensors
                 )
                 val offlinePayload = try {
                     CloudMapper.buildGatewayStatePayload(
@@ -662,7 +667,8 @@ class CloudGatewaySync(
                         smokePpm = currentValues.smokePpm,
                         smokeAlert = currentValues.smokeAlert,
                         window = currentValues.windowOpen,
-                        fan = currentValues.fanOn
+                        fan = currentValues.fanOn,
+                        longSensors = currentValues.longSensors
                     )
                     val statePayload = try {
                         CloudMapper.buildGatewayStatePayload(
@@ -809,6 +815,7 @@ class CloudGatewaySync(
         mode = mode,
         temp = temperature?.takeIf { it > CloudMapper.MIN_TEMP_EXCLUSIVE && it < CloudMapper.MAX_TEMP_EXCLUSIVE },
         hum = humidity?.takeIf { it in CloudMapper.MIN_HUM_INCLUSIVE..CloudMapper.MAX_HUM_INCLUSIVE },
+        longSensors = longSensors,
         smokePpm = smokePpm?.takeIf { it in CloudMapper.MIN_SMOKE_PPM_INCLUSIVE..CloudMapper.MAX_SMOKE_PPM_INCLUSIVE },
         smokeAlert = smokeAlert,
         windowOpen = windowOpen,

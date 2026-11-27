@@ -1,5 +1,6 @@
 package com.example.smarthomeai.cloud
 
+import com.example.smarthomeai.data.LongSensorReadings
 import com.example.smarthomeai.data.DeviceEvent
 import com.example.smarthomeai.data.HomeMode
 
@@ -55,7 +56,8 @@ data class GatewaySnapshot(
     val smokePpm: Int? = null,
     val smokeAlert: Boolean? = null,
     val window: Boolean? = null,
-    val fan: Boolean? = null
+    val fan: Boolean? = null,
+    val longSensors: LongSensorReadings? = null
 ) {
     constructor(
         online: Boolean,
@@ -156,7 +158,8 @@ data class GatewayStateSnapshot(
     val smokePpm: Int? = null,
     val smokeAlert: Boolean? = null,
     val window: Boolean? = null,
-    val fan: Boolean? = null
+    val fan: Boolean? = null,
+    val longSensors: LongSensorReadings? = null
 )
 
 data class CloudTelemetrySnapshot(

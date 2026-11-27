@@ -156,6 +156,22 @@ fun HomeScreen(state: SmartHomeState, onSetDevice: (DeviceType, Boolean) -> Unit
                     state.hardware?.smokePpm
                 }
                 val smokeText = smokePpm?.let { "$it ppm" } ?: "—"
+                val longSensors = if (cloudFallbackSnapshot != null) {
+                    cloudFallbackSnapshot.gatewayState?.longSensors
+                } else state.hardware?.longSensors
+                if (longSensors != null) {
+                    val lux = longSensors.lightLux?.let { "%,.1f lx".format(it) } ?: "—"
+                    val door = when (longSensors.reedClosed) {
+                        true -> "Đóng"
+                        false -> "Mở"
+                        null -> "—"
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Reading("Độ sáng", lux, Modifier.weight(1f))
+                        Reading("Tiếp điểm cửa", door, Modifier.weight(1f))
+                    }
+                    Text("Mưa ADC: ${longSensors.rainRaw ?: "—"} · RFID: ${sensorReady(longSensors.rfidReady)} · LCD: ${sensorReady(longSensors.lcdReady)}")
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Reading("Nhiệt độ", tempText, Modifier.weight(1f))
                     Reading("Độ ẩm", humText, Modifier.weight(1f))
@@ -319,4 +335,11 @@ private fun Reading(title: String, value: String, modifier: Modifier = Modifier,
         Text(title, style = MaterialTheme.typography.bodySmall, color = TextGray)
         Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = valueColor)
     }
+}
+
+
+private fun sensorReady(value: Boolean?): String = when (value) {
+    true -> "Kết nối"
+    false -> "Chưa nhận"
+    null -> "—"
 }
